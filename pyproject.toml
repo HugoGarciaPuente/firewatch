@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "firewatch"
+version = "0.2.0"
+description = "Wildfire early warning system: NASA FIRMS -> Kafka -> PostgreSQL/PostGIS -> FastAPI"
+requires-python = ">=3.11"
+# Pinned exactly: a container built from this must not drift between builds.
+# This is the UNION of all three tiers, kept here so `pip install -e .` works on
+# the host. The container build does not read it: the Dockerfile installs one of
+# requirements/{acquisition,processing,api}.txt so each image carries only what
+# its own code imports. Keep both in sync --
+# src/firewatch/tests/test_tiers.py fails if they disagree.
+dependencies = [
+    "fastapi==0.142.2",
+    "uvicorn[standard]==0.54.0",
+    "kafka-python==3.0.11",
+    "psycopg2-binary==2.9.13",
+    "httpx==0.28.1",
+    "python-dotenv==1.2.4",
+]
+
+[project.optional-dependencies]
+# Test tooling lives here, never in runtime dependencies.
+dev = [
+    "pytest==9.1.1",
+    "ruff==0.16.10",
+]
+
+[project.scripts]
+firewatch = "firewatch.runner:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+firewatch = ["static/*", "fixtures/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["src/firewatch/tests"]
+pythonpath = ["src"]
+addopts = ["-v"]
+
+[tool.ruff]
+line-length = 100
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "B", "SIM", "PERF", "C4"]
+# Mock signatures must mirror the real interfaces, so unused-argument is noisy.
+ignore = ["ARG001", "ARG002", "ARG005"]

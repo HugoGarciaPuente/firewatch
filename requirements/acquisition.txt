@@ -1,0 +1,7 @@
+# Tier 1 - acquisition (`refresh`).
+#
+# Publishes normalised FIRMS records to Kafka. Deliberately does NOT import the
+# database layer: a refetch that crashes must not be able to touch PostGIS.
+# psycopg2-binary (11 MB of bundled libpq) is absent from this image on purpose.
+
+-r base.txt

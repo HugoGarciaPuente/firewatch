@@ -1,0 +1,8 @@
+# Tier 3 - api (FastAPI + the dashboard served from the same process).
+#
+# Reads the database and validates sessions, so it needs psycopg2-binary as well
+# as the web stack.
+
+-r processing.txt
+fastapi==0.142.2
+uvicorn[standard]==0.54.0

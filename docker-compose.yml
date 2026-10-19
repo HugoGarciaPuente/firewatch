@@ -1,0 +1,142 @@
+# FireWatch — pila completa de microservicios.
+#
+# Postgres y Kafka se publican en ambas familias de loopback (IPv4 e IPv6).
+#
+# La aplicación se ejecuta en contenedores y se comunica con la infraestructura a través
+# de la red puente interna por nombre de servicio (firewatch-kafka:29092, postgres:5432),
+# nunca a través de los puertos publicados en el host.
+
+x-app-env: &app-env
+  env_file:
+    - .env
+  environment:
+    # La comunicación entre contenedores sobreescribe los valores de host de .env.
+    KAFKA_BOOTSTRAP_SERVERS: firewatch-kafka:29092
+    POSTGRES_DSN: postgresql://${POSTGRES_USER:-firewatch}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-firewatch}
+  restart: unless-stopped
+  networks: [firewatch]
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: firewatch-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-firewatch}
+      POSTGRES_USER: ${POSTGRES_USER:-firewatch}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+      - "[::1]:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-firewatch} -d ${POSTGRES_DB:-firewatch}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks: [firewatch]
+
+  kafka:
+    image: apache/kafka:3.9.0
+    container_name: firewatch-kafka
+    restart: unless-stopped
+    ports:
+      # Acceso exclusivo desde el host (CLI, herramientas locales).
+      - "127.0.0.1:9092:9092"
+      - "[::1]:9092:9092"
+      - "127.0.0.1:9093:9093"
+      - "[::1]:9093:9093"
+    environment:
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_NODE_ID: 1
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_LISTENERS: PLAINTEXT://:29092,CONTROLLER://:9093,PLAINTEXT_HOST://:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://firewatch-kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+    networks: [firewatch]
+
+  # ---------------------------------------------------------------------
+  # Tier 3 - api: FastAPI + dashboard. Único servicio que expone HTTP al host.
+  # ---------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      target: api
+    image: firewatch:api
+    container_name: firewatch-api
+    <<: *app-env
+    ports:
+      # Puerto publicado en loopback. Configurable mediante API_PORT en .env (ej. 8080).
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+      - "[::1]:${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    volumes:
+      # Los logs rotativos de la aplicación se guardan en este volumen compartido.
+      - app_logs:/app/logs
+    networks: [firewatch]
+
+  # ---------------------------------------------------------------------
+  # Tier 2 - processing: Kafka -> scoring de riesgo -> PostGIS.
+  # ---------------------------------------------------------------------
+  processor:
+    build:
+      context: .
+      target: processing
+    image: firewatch:processing
+    container_name: firewatch-processor
+    <<: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    volumes:
+      - app_logs:/app/logs
+    networks: [firewatch]
+
+  # ---------------------------------------------------------------------
+  # Tier 1 - acquisition: FIRMS + Open-Meteo -> Kafka. Sin driver de base de datos.
+  # ---------------------------------------------------------------------
+  refresh:
+    build:
+      context: .
+      target: acquisition
+    image: firewatch:acquisition
+    container_name: firewatch-refresh
+    <<: *app-env
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - app_logs:/app/logs
+    networks: [firewatch]
+
+volumes:
+  pg_data:
+  app_logs:
+
+networks:
+  firewatch:
+    driver: bridge

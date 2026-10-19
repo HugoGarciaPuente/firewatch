@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🔥 FireWatch — Dashboard de Incendios Forestales</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/static/style.css?v=11">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Encabezado -->
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-icon">🔥</span>
+        <div>
+          <h1 class="brand-title">FireWatch <span class="badge badge-phase"></span></h1>
+          <p class="brand-subtitle">Detección Satelital FIRMS &amp; Modelado de Riesgo en Tiempo Real</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <div class="status-indicator" id="system-status">
+          <span class="status-dot"></span>
+          <span class="status-text">Conectando...</span>
+        </div>
+        <button id="btn-refresh" class="btn btn-secondary" title="Actualizar datos">
+          <span class="icon">🔄</span> Actualizar
+        </button>
+        <button id="btn-logout" class="btn btn-secondary" title="Cerrar sesión">
+          <span class="icon">⎋</span> Salir
+        </button>
+        <button id="btn-open-ingest" class="btn btn-primary" title="Lanzar ingesta">
+          <span class="icon"></span> Nueva Ingesta
+        </button>
+      </div>
+    </header>
+
+    <!-- Fila de métricas -->
+    <section class="kpi-grid">
+      <div class="kpi-card">
+        <div class="kpi-label">Focos Activos</div>
+        <div class="kpi-value" id="kpi-total">-</div>
+        <div class="kpi-hint" id="kpi-date-range">Sin datos</div>
+      </div>
+      <div class="kpi-card kpi-extreme">
+        <div class="kpi-label">Riesgo Extremo</div>
+        <div class="kpi-value" id="kpi-extreme">0</div>
+        <div class="kpi-hint">indice &ge; 0.75</div>
+      </div>
+      <div class="kpi-card kpi-high">
+        <div class="kpi-label">Riesgo Alto</div>
+        <div class="kpi-value" id="kpi-high">0</div>
+        <div class="kpi-hint">indice 0.50 - 0.74</div>
+      </div>
+      <div class="kpi-card kpi-moderate">
+        <div class="kpi-label">Riesgo Moderado</div>
+        <div class="kpi-value" id="kpi-moderate">0</div>
+        <div class="kpi-hint">indice 0.25 - 0.49</div>
+      </div>
+      <div class="kpi-card kpi-low">
+        <div class="kpi-label">Riesgo Bajo</div>
+        <div class="kpi-value" id="kpi-low">0</div>
+        <div class="kpi-hint">indice &lt; 0.25</div>
+      </div>
+    </section>
+
+    <!-- Espacio principal (Mapa y panel lateral) -->
+    <main class="workspace">
+      <!-- Contenedor del mapa Leaflet -->
+      <div class="map-wrapper">
+        <div id="map"></div>
+        <div class="map-overlay-controls">
+          <div class="preset-regions">
+            <span class="preset-label">Vistas:</span>
+            <button class="btn-chip active" data-bbox="35.9,-9.6,43.9,3.6">Península Ibérica</button>
+            <button class="btn-chip" data-bbox="38.5,0.4,40.7,4.7">Baleares</button>
+            <button class="btn-chip" data-bbox="27.4,-18.7,29.6,-13.1">Canarias</button>
+            <button class="btn-chip" data-bbox="27.4,-18.7,43.9,4.7">España</button>
+          </div>
+          <div class="map-legend">
+            <div class="legend-title">Nivel de Riesgo</div>
+            <div class="legend-items">
+              <span class="legend-item"><span class="dot dot-extreme"></span> Extremo</span>
+              <span class="legend-item"><span class="dot dot-high"></span> Alto</span>
+              <span class="legend-item"><span class="dot dot-moderate"></span> Moderado</span>
+              <span class="legend-item"><span class="dot dot-low"></span> Bajo</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Barra lateral e inspector -->
+      <aside class="sidebar">
+        <!-- Controles de filtrado -->
+        <div class="panel-section">
+          <h2 class="panel-title">Filtros de Análisis</h2>
+          
+          <div class="filter-group">
+            <label>Día de adquisición</label>
+            <div id="date-summary" class="date-summary">
+              <span class="date-summary-main">Cargando fecha...</span>
+              <span class="date-summary-sub" id="date-summary-sub">&nbsp;</span>
+            </div>
+
+            <div class="calendar">
+              <div class="cal-header">
+                <button type="button" id="cal-prev-month" class="btn-nav" title="Mes anterior">‹</button>
+                <span class="cal-month-label" id="cal-month-label">—</span>
+                <button type="button" id="cal-next-month" class="btn-nav" title="Mes siguiente">›</button>
+              </div>
+
+              <div class="cal-weekdays">
+                <span>L</span><span>M</span><span>X</span><span>J</span><span>V</span><span>S</span><span>D</span>
+              </div>
+
+              <div id="calendar-grid" class="cal-grid">
+                <div class="loading-placeholder">Cargando...</div>
+              </div>
+            </div>
+
+            <div class="history-actions">
+              <button type="button" id="btn-day-last" class="btn-chip active">Último día</button>
+            </div>
+            <small class="form-hint">Los días con punto tienen datos. Selecciona uno para filtrar mapa e indicadores.</small>
+          </div>
+
+          <div class="filter-group">
+            <label for="filter-risk">Nivel de Riesgo</label>
+            <select id="filter-risk" class="form-select">
+              <option value="">Todos los niveles</option>
+              <option value="extreme">Extremo</option>
+              <option value="high">Alto</option>
+              <option value="moderate">Moderado</option>
+              <option value="low">Bajo</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <div class="slider-header">
+              <label for="filter-score">Puntuación Mínima</label>
+              <span id="score-val" class="slider-val">0.00</span>
+            </div>
+            <input type="range" id="filter-score" min="0" max="1" step="0.05" value="0" class="form-range">
+          </div>
+        </div>
+
+        <!-- Inspector del evento seleccionado -->
+        <div class="panel-section" id="inspector-panel" style="display: none;">
+          <div class="inspector-header">
+            <h2 class="panel-title">Detalle del Foco</h2>
+            <button id="btn-close-inspector" class="btn-close">&times;</button>
+          </div>
+          <div id="inspector-content" class="inspector-body">
+            <!-- Contenido dinámico -->
+          </div>
+        </div>
+
+        <!-- Lista de eventos -->
+        <div class="panel-section flex-1 event-list-section">
+          <div class="list-header">
+            <h2 class="panel-title">Focos Detectados (<span id="event-count">0</span>)</h2>
+          </div>
+          <div id="events-list" class="events-list">
+            <div class="loading-placeholder">Cargando anomalías térmicas...</div>
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <!-- Ventana modal de ingesta -->
+  <div id="ingest-modal" class="modal-backdrop" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title">🛰️ Disparar Ingesta NASA FIRMS</h3>
+        <button id="btn-close-modal" class="btn-close">&times;</button>
+      </div>
+      <form id="ingest-form">
+        <div class="form-group">
+          <label for="ingest-bbox">Bounding Box (sur, oeste, norte, este)</label>
+          <input type="text" id="ingest-bbox" class="form-input" value="35.9,-9.6,43.9,3.6" required>
+          <small class="form-hint">Regiones: Península 35.9,-9.6,43.9,3.6 · Baleares 38.5,0.4,40.7,4.7 · Canarias 27.4,-18.7,29.6,-13.1</small>
+        </div>
+        <div class="form-group">
+          <label for="ingest-date">Fecha (YYYY-MM-DD, opcional)</label>
+          <input type="date" id="ingest-date" class="form-input">
+          <small class="form-hint">Dejar vacío para el día actual</small>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="btn-cancel-modal" class="btn btn-secondary">Cancelar</button>
+          <button type="submit" id="btn-submit-ingest" class="btn btn-primary">Ejecutar Ingesta</button>
+        </div>
+      </form>
+      <div id="ingest-feedback" class="feedback-box" style="display: none;"></div>
+    </div>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <!-- Leaflet.heat (capa de mapa de calor) -->
+  <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+  <!-- Leaflet.markercluster (cluster de marcadores) -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+  <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+  <!-- Código de la aplicación -->
+  <script src="/static/app.js?v=11"></script>
+</body>
+</html>

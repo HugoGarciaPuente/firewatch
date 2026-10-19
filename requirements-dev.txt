@@ -1,0 +1,7 @@
+# Development / test dependencies (not needed at runtime).
+-r requirements.txt
+
+# Linter used for the static checks described in AGENTS.md.
+ruff==0.16.10
+
+pytest==9.1.1

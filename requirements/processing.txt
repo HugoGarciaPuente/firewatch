@@ -1,0 +1,8 @@
+# Tier 2 - processing (`processor`).
+#
+# Consumes from Kafka, scores risk, writes PostGIS. Reads the database, so it
+# needs psycopg2-binary. Carries no web framework: nothing here serves HTTP, and
+# fastapi/uvicorn/starlette/pydantic (roughly 34 MB) are excluded.
+
+-r base.txt
+psycopg2-binary==2.9.13

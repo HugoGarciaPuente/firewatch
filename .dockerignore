@@ -1,0 +1,41 @@
+# --- Secrets: never bake credentials into an image ---
+.env
+.env.*
+!.env.example
+
+# --- VCS / editor ---
+.git
+.gitignore
+.vscode
+.idea
+
+# --- Docs and local-only material ---
+docs
+logs
+*.md
+!README.md
+# requirements/README.md explains the tier split and is not needed to build.
+requirements/README.md
+
+# --- Python artefacts ---
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.egg-info
+**/.eggs
+**/build
+**/dist
+.venv
+venv
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.coverage
+htmlcov
+
+# --- Tests are not needed at runtime ---
+**/tests
+**/tests/**
+
+# --- Local compose override ---
+docker-compose.override.yml

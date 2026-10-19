@@ -1,0 +1,12 @@
+# Runtime dependencies for a LOCAL development install.
+#
+# The container build does NOT use this file. It installs one of the per-tier
+# files in requirements/ so each image carries only what its tier imports; see
+# requirements/README.md.
+#
+# For local work you want everything, so this aggregates the widest tier (api),
+# which transitively includes base and processing. Keep this file as a
+# superset: `pip install -r requirements.txt` must keep working for anyone
+# running the test suite or the CLI on the host.
+
+-r requirements/api.txt
