@@ -21,11 +21,12 @@ firewatch/
 │   ├── firewatch/              # Main Python package
 │   │   ├── __init__.py
 │   │   ├── config.py           # Settings: env vars + REGION_BBOXES
-│   │   ├── runner.py           # CLI: ingest / backfill / daily / process
+│   │   ├── runner.py           # CLI: ingest / backfill / daily / process / geocode-backfill
 │   │   ├── clients/            # External API clients (all outbound calls here)
 │   │   │   ├── __init__.py
 │   │   │   ├── firms.py        # NASA FIRMS API client
-│   │   │   └── weather.py      # Open-Meteo client, cached per 0.25° cell
+│   │   │   ├── weather.py      # Open-Meteo client, cached per 0.25° cell
+│   │   │   └── geocode.py      # Nominatim reverse geocoding, cached per exact point
 │   │   ├── services/           # Business services
 │   │   │   ├── __init__.py
 │   │   │   ├── ingestion.py    # Kafka producer ingestion
@@ -35,6 +36,7 @@ firewatch/
 │   │   │   ├── __init__.py
 │   │   │   ├── auth.py         # API key + signed session cookie
 │   │   │   ├── auth_routes.py  # /auth/login, /auth/logout, login page
+│   │   │   ├── ratelimit.py    # Login throttle: 5 attempts/min per client
 │   │   │   ├── main.py         # FastAPI app, docs gating, /static guard
 │   │   │   └── endpoints.py    # API endpoints
 │   │   ├── static/             # Dashboard assets (session-guarded)
@@ -46,38 +48,45 @@ firewatch/
 │   │       ├── __init__.py
 │   │       ├── conftest.py
 │   │       ├── test_clients.py
+│   │       ├── test_config.py
+│   │       ├── test_geocode.py
 │   │       ├── test_ingestion.py
 │   │       ├── test_processing.py
+│   │       ├── test_ratelimit.py
+│   │       ├── test_regions.py
 │   │       ├── test_risk.py
 │   │       ├── test_api.py
 │   │       ├── test_tiers.py     # Guards the per-tier dependency split
 │   │       └── test_runner.py
 │   └── fixtures/               # JSON fixtures for tests
 │       └── firms_sample.json   # Sample NASA FIRMS response
-└── tests/                      # Top-level tests (optional)
 ```
 
 ## Key Responsibilities
 
 - **Agents**: Follow the implementation plan, preserve existing code, add working E2E behavior
 - **Constraints**: env vars for secrets, dedicated clients/adapters, fixtures/mocks for tests, idempotent ingestion, separate risk-scoring code, Docker Compose for infra
+- **Tests**: keep only assertions that can fail for a real reason. No tautologies,
+  no tests for options no caller uses, no duplicate of a property another test
+  already pins. A test that accepts both outcomes catches nothing.
 
 ## Domain Scope
 
 Tracking covers **only Península Ibérica, Baleares and Canarias** (see
 `settings.REGION_BBOXES`). Do not widen the default scope: a continental
 European bbox produces ~76× more daily records with no value for these
-territories. `resolve_regions()` in `runner.py` is the single place that
-resolves scope (`--bbox` > `--regions` > `FIREWATCH_REGIONS`).
+territories. `resolve_regions()` in `config.py` is the single place that
+resolves scope (`--bbox` > `--regions` > `FIREWATCH_REGIONS`); it lives in
+`config` so the API can use it without importing the CLI.
 
 ## Available Commands
 
 - `docker compose up -d --build` - **Start everything** (api, processor, refresh, postgres, kafka)
 - `docker compose build api` - Rebuild one tier only (target: api/processing/acquisition)
 - `docker compose logs -f refresh` - Watch the FIRMS refresh loop
-- `docker compose ps` - Confirm all five services are healthy
+- `docker compose ps` - Confirm the five services are up (only `api`, `postgres` and `kafka` expose a healthcheck)
 - `pip install -e .` or `pip install -r requirements-dev.txt` - Local dev setup
-- `pytest` - Run tests (79 tests, no live services required)
+- `pytest` - Run tests (114 tests, no live services required)
 - `python -m firewatch.runner ingest` - One-shot FIRMS fetch -> Kafka
 - `python -m firewatch.runner backfill --start-date D --end-date D` - Historical load (one request per day)
 - `python -m firewatch.runner daily --days 3` - Loop that keeps data fresh
@@ -92,9 +101,9 @@ resolves scope (`--bbox` > `--regions` > `FIREWATCH_REGIONS`).
   returned "Manaus, Brasil" for a Spanish bounding box and consumed the rate
   limit budget.
 - **Nominatim returns HTTP 429 if you exceed 1 req/s.** `GEOCODE_MIN_INTERVAL`
-  defaults to 1.1 s. A full backfill of ~594 points takes ~11 min; run it with
-  `runner geocode-backfill --limit N` in chunks. Stop the `processor` first if
-  it is also geocoding, or they share the same budget.
+  defaults to 1.1 s. A backfill of a few hundred points takes over 10 min; run
+  it with `runner geocode-backfill --limit N` in chunks. Stop the `processor`
+  first if it is also geocoding, or they share the same budget.
 - **Locality is never overwritten with NULL.** The upsert uses
   `COALESCE(EXCLUDED.locality, fire_events.locality)`, because FIRMS reissues
   recent days and a Nominatim outage must not blank every name in the database.
@@ -114,7 +123,8 @@ resolves scope (`--bbox` > `--regions` > `FIREWATCH_REGIONS`).
   stage becomes the default image, so a typo builds the wrong tier without
   error. `test_tiers.py::test_compose_build_targets_are_explicit` guards it.
 - **`docker compose down` does not delete data**, but `down -v` deletes the
-  Postgres volume. The 594 events in `fire_events` live there and nowhere else.
+  Postgres volume. The ingested events in `fire_events` live there and nowhere
+  else; losing the volume means re-running the backfill.
 - **Static assets are cache-busted with `?v=N`.** After editing `app.js` or
   `style.css`, bump `N` in `static/index.html`, otherwise the browser keeps
   serving the cached copy and the change appears to have no effect.
@@ -145,6 +155,14 @@ resolves scope (`--bbox` > `--regions` > `FIREWATCH_REGIONS`).
 - **Never let the refresh report partial success.** `refresh_once()` returns 1
   if any region/day failed after retries. Do not "helpfully" swallow that:
   a silent partial refresh freezes the dataset unnoticed.
+- **There is one Kafka topic: `firms-ingest`.** Risk scores live in Postgres,
+  not in a second stream. An earlier `fire-risk-alerts` topic had zero
+  consumers, duplicated `fire_events` and emitted 59% duplicates; it was
+  removed. Do not add an output topic without a real consumer and a dedup key.
+- **Kafka creates topics on the first `send()`.** `KAFKA_AUTO_CREATE_TOPICS_ENABLE`
+  is on, so deleting a topic is not enough: a producer still running on an old
+  image recreates it with the next message. Rebuild and restart the publishers
+  first, then delete the topic.
 - **FIRMS has no data for the current day.** `last_date` normally trails by
   one day; that is NRT latency, not a bug.
 - **Recent days change size a lot.** On 2026-10-08, re-fetching 2026-10-07
@@ -154,13 +172,19 @@ resolves scope (`--bbox` > `--regions` > `FIREWATCH_REGIONS`).
   never holds the key. `require_api_key`
   guards `POST /auth/login`; `require_session` guards `/dashboard` and every
   `/api/v1/fire/*` route.
+- **The login throttle runs before the credential check.** `RateLimiter` is a
+  dependency declared ahead of `require_api_key` (5 attempts/min per client),
+  so a blocked caller never reaches the key comparison. Reordering the
+  dependencies turns the throttle into a no-op after the first guess.
 - **`APP_ENV=production` disables `/docs`, `/redoc`, `/openapi.json`** and
   refuses to boot without a valid `API_KEY` and a *different* `SESSION_SECRET`.
   Do not add a "temporarily" bypass: a silent auth downgrade is worse than a
   failed start.
-- **Tests need the secrets set before importing config.** `test_api.py` sets
-  `API_KEY`/`SESSION_SECRET` via `os.environ.setdefault` at the top. A new test
-  module that imports `firewatch.config` must do the same.
+- **Only tests that touch auth need the secrets set before importing config.**
+  `test_api.py` sets `API_KEY`/`SESSION_SECRET` via `os.environ.setdefault` at
+  the top because `_validate_settings()` raises on import under
+  `APP_ENV=production`. Plain config tests do not need it: validation is
+  skipped outside production.
 - **`.env` must never be committed.** `.gitignore` now covers it. Verify with
   `git check-ignore .env` before the first commit.
 - **PowerShell `Set-Content -Encoding UTF8` writes a BOM**, which breaks
