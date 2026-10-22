@@ -269,7 +269,14 @@ def _run_ingest(job_id: str, regions: list, date: Optional[str]) -> None:
     Se ejecuta tras haberse enviado la respuesta HTTP. Los fallos se registran, no se elevan:
     una excepción aquí quedaría huérfana de petición y el emisor ya recibió su código 202.
     """
-    client = FirmsClient()
+    try:
+        client = FirmsClient()
+    except ValueError as exc:
+        # La respuesta 202 ya se envió: un fallo aquí no puede elevarse, solo
+        # registrarse con el suficiente detalle para diagnosticarlo.
+        logger.error("Ingest job %s: FIRMS client unavailable: %s", job_id, exc)
+        return
+
     records: list = []
     per_region: Dict[str, int] = {}
 

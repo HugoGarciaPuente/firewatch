@@ -87,6 +87,31 @@ def test_fetch_raises_on_http_error():
         client.fetch_by_bbox("0,0,1,1", date="2024-01-01")
 
 
+def test_missing_api_key_is_rejected_at_construction():
+    """FIRMS has no anonymous area endpoint, so there is no fallback URL to build.
+
+    The branch this replaced was also broken (it forwarded the bbox in
+    south,west,north,east order) and no test ever executed it.
+    """
+    with pytest.raises(ValueError, match="NASA_FIRMS_API_KEY"):
+        FirmsClient(api_key="")
+
+
+def test_request_carries_the_reordered_bbox_and_no_query_string(firms_sample):
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = request.url
+        return httpx.Response(200, json=firms_sample)
+
+    client = _client_with_handler(handler)
+    client.fetch_by_bbox("37.0,-9.6,43.9,3.6")
+
+    assert captured["url"].query == b""
+    assert "-9.6,37.0,3.6,43.9" in captured["url"].path
+    assert "37.0,-9.6,43.9,3.6" not in captured["url"].path
+
+
 def test_weather_client_returns_metrics():
     from firewatch.clients.weather import WeatherClient
 

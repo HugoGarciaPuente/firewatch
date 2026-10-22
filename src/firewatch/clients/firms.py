@@ -8,8 +8,9 @@ puedan simularse/mockearse en los tests.
 Endpoint:
   GET {base}/area/csv/{MAP_KEY}/{SOURCE}/{AREA_COORDINATES}/{DAY_RANGE}[/{DATE}]
 
-La API de área de FIRMS requiere una clave provista mediante la variable de
-entorno ``NASA_FIRMS_API_KEY``.
+La API de área de FIRMS no tiene endpoint anónimo: exige una clave, provista
+mediante la variable de entorno ``NASA_FIRMS_API_KEY``. Sin clave el cliente se
+niega a construirse, en lugar de inventar una URL que no existe.
 """
 
 from __future__ import annotations
@@ -49,9 +50,21 @@ class FirmsClient:
         api_key: Optional[str] = None,
         source: str = "VIIRS_SNPP_NRT",
     ):
+        resolved_key = (
+            api_key if api_key is not None else settings.NASA_FIRMS_API_KEY
+        ).strip()
+        if not resolved_key:
+            # Se valida antes de crear el cliente HTTP: no hay motivo para
+            # abrir un pool de conexiones que nunca se va a usar.
+            raise ValueError(
+                "NASA_FIRMS_API_KEY is required: the FIRMS area API has no "
+                "anonymous endpoint. Get a key at "
+                "https://firms.modaps.eosdis.nasa.gov/api/area/ and set it in .env"
+            )
+
         self._client = client or httpx.Client()
         self.base_url = (base_url or settings.NASA_FIRMS_BASE_URL).rstrip("/")
-        self.api_key = (api_key if api_key is not None else settings.NASA_FIRMS_API_KEY).strip()
+        self.api_key = resolved_key
         self.source = source
 
     def fetch_by_bbox(self, bbox: str, date: Optional[str] = None) -> List[Dict]:
@@ -73,19 +86,16 @@ class FirmsClient:
         area_coords = _format_area_coordinates(bbox)
         day_range = 1
 
-        if self.api_key:
-            url = f"{self.base_url}/area/csv/{self.api_key}/{self.source}/{area_coords}/{day_range}"
-            if date:
-                url = f"{url}/{date}"
-            params = None
-        else:
-            # Fallback cuando no hay clave de API configurada
-            url = f"{self.base_url}/area/csv"
-            params = {"bbox": bbox, "format": "json"}
-            if date:
-                params["date"] = date
+        # La clave va en la ruta porque FIRMS lo exige así; no se puede pasar
+        # como cabecera. Coordenadas ya reordenadas a oeste,sur,este,norte.
+        url = (
+            f"{self.base_url}/area/csv/{self.api_key}/"
+            f"{self.source}/{area_coords}/{day_range}"
+        )
+        if date:
+            url = f"{url}/{date}"
 
-        response = self._client.get(url, params=params, timeout=30.0)
+        response = self._client.get(url, timeout=30.0)
         response.raise_for_status()
 
         # Intentar parsear JSON primero (si es un mock/fixture o respuesta JSON)
