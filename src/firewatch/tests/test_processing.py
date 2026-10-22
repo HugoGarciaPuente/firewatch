@@ -297,7 +297,7 @@ def test_low_risk_event_does_not_publish_alert():
 
 
 def test_trigger_ingest_defaults_to_regions_not_the_whole_planet():
-    """Regression: /fire/ingest fell back to the global NASA_FIRMS_BBOX.
+    """Regression: /fire/ingest once fell back to a planet-wide default bbox.
 
     The handler no longer fetches anything itself -- it schedules a background
     task -- so the assertion is on the regions it *schedules*. If someone

@@ -7,13 +7,18 @@ load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env")
 
 
 class Settings:
-    """Configuración cargada a partir de variables de entorno."""
+    """Configuración cargada a partir de variables de entorno.
+
+    ``os.getenv`` siempre devuelve ``str``, así que todo valor numérico se
+    convierte explícitamente (``int(...)``/``float(...)``). Sin la conversión la
+    anotación de tipo miente y el consumidor falla con ``TypeError`` en mitad
+    de una operación, lejos del origen del problema.
+    """
 
     # NASA FIRMS
     NASA_FIRMS_BASE_URL: str = os.getenv(
         "NASA_FIRMS_BASE_URL", "https://firms.modaps.eosdis.nasa.gov/api"
     )
-    NASA_FIRMS_BBOX: str = os.getenv("NASA_FIRMS_BBOX", "-90,-180,90,180")  # global
     NASA_FIRMS_DATE: str = os.getenv("NASA_FIRMS_DATE", "")  # vacío = hoy
     # Secreto: registrarse en https://firms.modaps.eosdis.nasa.gov/api/area/
     NASA_FIRMS_API_KEY: str = os.getenv("NASA_FIRMS_API_KEY", "")
@@ -55,7 +60,8 @@ class Settings:
     # Tamaño de celda (grados) de la caché de clima. 0.25 ≈ 25 km: el clima no
     # varía de forma apreciable en esa escala y reduce las llamadas a Open-Meteo
     # de una por registro a una por celda.
-    WEATHER_CACHE_CELL: float = os.getenv("WEATHER_CACHE_CELL", "0.25")
+    # float(): os.getenv devuelve str; dividir por un str lanza TypeError.
+    WEATHER_CACHE_CELL: float = float(os.getenv("WEATHER_CACHE_CELL", "0.25"))
 
     # Geocodificación inversa / Nominatim. FIRMS solo devuelve coordenadas, así
     # que la localidad hay que resolverla contra OpenStreetMap.
@@ -68,7 +74,7 @@ class Settings:
         "NOMINATIM_USER_AGENT", "FireWatch/0.2 (university practice project)"
     )
     # Segundos mínimos entre peticiones. 1.1 da margen sobre el límite de 1/s.
-    GEOCODE_MIN_INTERVAL: float = os.getenv("GEOCODE_MIN_INTERVAL", "1.1")
+    GEOCODE_MIN_INTERVAL: float = float(os.getenv("GEOCODE_MIN_INTERVAL", "1.1"))
     # La geocodificación es un extra: si Nominatim está caído, el foco se guarda
     # sin localidad y `runner geocode-backfill` rellena los huecos después.
     ENABLE_GEOCODING: bool = os.getenv("ENABLE_GEOCODING", "true").lower() in (
