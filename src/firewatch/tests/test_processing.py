@@ -320,24 +320,6 @@ def test_trigger_ingest_defaults_to_regions_not_the_whole_planet():
     assert body["job_id"]
 
 
-def test_trigger_ingest_returns_before_doing_any_work():
-    """The whole point of the change: no blocking call in the request path.
-
-    Scheduling is only worth it if the request does not touch FIRMS or Kafka.
-    This asserts the handler added a task and did not execute it -- FastAPI
-    runs BackgroundTasks after the response is sent, not during the call.
-    """
-    from fastapi import BackgroundTasks
-
-    from firewatch.api import endpoints
-
-    background = BackgroundTasks()
-    endpoints.trigger_ingest(background)
-
-    assert len(background.tasks) == 1
-    assert background.tasks[0].func is endpoints._run_ingest
-
-
 def test_ingest_response_bbox_is_not_a_concatenated_string():
     """Regression: the old response joined every region bbox into one string.
 

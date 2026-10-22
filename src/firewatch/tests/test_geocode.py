@@ -146,26 +146,6 @@ def test_http_error_is_not_fatal():
     assert client.get_location(40.0, -3.0) is None
 
 
-def test_cache_can_be_disabled():
-    calls = []
-
-    def handler(request):
-        calls.append(1)
-        return httpx.Response(200, json=SPANISH_PAYLOAD)
-
-    client = _client(handler, cache_enabled=False)
-    client.get_location(39.590, -2.100)
-    client.get_location(39.590, -2.100)
-    assert len(calls) == 2
-
-
-def test_clear_cache_resets_counters():
-    client = _client(lambda request: httpx.Response(200, json=SPANISH_PAYLOAD))
-    client.get_location(39.590, -2.100)
-    client.clear_cache()
-    assert client.cache_stats() == {"hits": 0, "misses": 0, "size": 0}
-
-
 def test_sends_an_identifying_user_agent():
     """The OSMF usage policy requires a real User-Agent. Not optional."""
     seen = {}

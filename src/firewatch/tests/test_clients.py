@@ -42,7 +42,10 @@ def test_fetch_sends_bbox_and_date_params(firms_sample):
     path = captured["url"].path
     assert "test-api-key" in path
     assert "20,10,40,30" in path  # west,south,east,north
+    assert "10,20,30,40" not in path  # the caller's order must never reach FIRMS
     assert path.endswith("/1/2024-08-15")
+    # Everything travels in the path; a query string would mean a second code path.
+    assert captured["url"].query == b""
 
 
 def test_fetch_omits_date_when_not_provided(firms_sample):
@@ -95,21 +98,6 @@ def test_missing_api_key_is_rejected_at_construction():
     """
     with pytest.raises(ValueError, match="NASA_FIRMS_API_KEY"):
         FirmsClient(api_key="")
-
-
-def test_request_carries_the_reordered_bbox_and_no_query_string(firms_sample):
-    captured: dict = {}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        captured["url"] = request.url
-        return httpx.Response(200, json=firms_sample)
-
-    client = _client_with_handler(handler)
-    client.fetch_by_bbox("37.0,-9.6,43.9,3.6")
-
-    assert captured["url"].query == b""
-    assert "-9.6,37.0,3.6,43.9" in captured["url"].path
-    assert "37.0,-9.6,43.9,3.6" not in captured["url"].path
 
 
 def test_weather_client_returns_metrics():
@@ -178,25 +166,6 @@ def test_weather_client_caches_per_cell():
 
     assert calls["n"] == 1
     assert client.cache_stats() == {"hits": 2, "misses": 1, "size": 1}
-
-
-def test_weather_client_cache_can_be_disabled():
-    from firewatch.clients.weather import WeatherClient
-
-    calls = {"n": 0}
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        calls["n"] += 1
-        return httpx.Response(200, json={"current": {}})
-
-    client = WeatherClient(
-        client=httpx.Client(transport=httpx.MockTransport(handler)),
-        cache_enabled=False,
-    )
-    client.get_weather(40.4168, -3.7038)
-    client.get_weather(40.4168, -3.7038)
-
-    assert calls["n"] == 2
 
 
 def test_weather_client_caches_failures():

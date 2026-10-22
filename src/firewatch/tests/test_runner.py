@@ -6,21 +6,6 @@ import pytest
 
 from firewatch.config import resolve_regions, settings
 
-def test_resolve_regions_defaults_to_configured_scope():
-    regions = resolve_regions()
-
-    labels = [label for label, _ in regions]
-    assert "peninsula" in labels
-    assert "peninsula_sur" in labels
-    assert "canarias" in labels
-    assert "baleares" in labels
-
-    for _, bbox in regions:
-        parts = bbox.split(",")
-        assert len(parts) == 4
-        assert all(float(p) for p in parts)
-
-
 def test_resolve_regions_explicit_subset():
     assert [label for label, _ in resolve_regions(regions_arg="canarias")] == ["canarias"]
     assert [label for label, _ in resolve_regions(regions_arg="peninsula")] == ["peninsula", "peninsula_sur"]

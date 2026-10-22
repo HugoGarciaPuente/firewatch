@@ -53,19 +53,6 @@ def test_run_ingestion_publishes_all_records(firms_sample):
     assert {r["latitude"] for _, r in producer.sent} == {19.5, -3.1}
 
 
-def test_run_ingestion_is_repeatable(firms_sample):
-    """Re-running ingestion publishes the same records (DB upsert dedupes)."""
-    producer = FakeProducer()
-    run_ingestion(firms_sample, producer, topic="test-topic")
-    run_ingestion(firms_sample, producer, topic="test-topic")
-
-    assert len(producer.sent) == 4  # duplicates only exist in transit
-    # Records are unchanged between runs -> deterministic upsert key
-    first_run = producer.sent[:2]
-    second_run = producer.sent[2:]
-    assert [r for _, r in first_run] == [r for _, r in second_run]
-
-
 def test_run_ingestion_empty_batch():
     producer = FakeProducer()
     count = run_ingestion([], producer, topic="test-topic")

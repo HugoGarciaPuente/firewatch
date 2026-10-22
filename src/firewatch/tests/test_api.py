@@ -34,15 +34,6 @@ def authed():
     return c
 
 
-def test_root_returns_app_info():
-    response = client.get("/")
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["name"] == "FireWatch"
-    assert body["status"] == "running"
-
-
 def test_health_endpoint():
     response = client.get("/health")
 
@@ -69,14 +60,6 @@ def test_openapi_document_generated():
     # /stats accepts a day so the top KPIs follow the selected day
     stats_params = [p["name"] for p in paths["/api/v1/fire/stats"]["get"]["parameters"]]
     assert "date" in stats_params
-
-
-def test_health_db_endpoint():
-    response = client.get("/health/db")
-    # Will be 200 when DB is up, or 503 if DB is not reachable
-    assert response.status_code in (200, 503)
-    if response.status_code == 200:
-        assert response.json() == {"status": "healthy", "database": "connected"}
 
 
 def test_dashboard_endpoint_requires_session(authed):

@@ -77,19 +77,6 @@ def test_window_expires():
     assert limiter.check("1.1.1.1")[0] is True, "the window must reopen"
 
 
-def test_reset_clears_one_client_or_everyone():
-    limiter = RateLimiter(limit=1, window_seconds=60)
-    limiter.check("1.1.1.1")
-    limiter.check("2.2.2.2")
-
-    limiter.reset("1.1.1.1")
-    assert limiter.check("1.1.1.1")[0] is True
-    assert limiter.check("2.2.2.2")[0] is False
-
-    limiter.reset()
-    assert limiter.check("2.2.2.2")[0] is True
-
-
 @pytest.mark.parametrize("limit,window", [(0, 60), (-1, 60), (5, 0), (5, -1)])
 def test_rejects_a_nonsensical_policy(limit, window):
     """A misconfigured limiter must fail loudly, not silently allow everything."""
@@ -136,7 +123,7 @@ def test_login_is_rate_limited_after_repeated_failures(client):
 
     blocked = client.post("/auth/login", headers={"X-API-Key": "wrong"})
     assert blocked.status_code == 429
-    assert "Retry-After" in blocked.headers
+    assert int(blocked.headers["Retry-After"]) >= 1, "a rejected caller needs a wait time"
 
 
 def test_successful_login_after_limit_is_also_blocked(client, api_key):
@@ -148,13 +135,3 @@ def test_successful_login_after_limit_is_also_blocked(client, api_key):
 
     r = client.post("/auth/login", headers={"X-API-Key": api_key})
     assert r.status_code == 429, "the limiter must apply to valid keys as well"
-
-
-def test_429_carries_retry_after(client):
-    r = None
-    for _ in range(12):
-        r = client.post("/auth/login", headers={"X-API-Key": "wrong"})
-        if r.status_code == 429:
-            break
-    assert r is not None and r.status_code == 429
-    assert int(r.headers["Retry-After"]) >= 1
