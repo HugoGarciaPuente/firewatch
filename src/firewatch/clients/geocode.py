@@ -59,14 +59,12 @@ class GeoCodeClient:
         client: Optional[httpx.Client] = None,
         base_url: Optional[str] = None,
         min_interval: Optional[float] = None,
-        cache_enabled: bool = True,
     ):
         self._client = client or httpx.Client()
         self.base_url = (base_url or settings.NOMINATIM_BASE_URL).rstrip("/")
         self.min_interval = (
             min_interval if min_interval is not None else float(settings.GEOCODE_MIN_INTERVAL)
         )
-        self._cache_enabled = cache_enabled
         # Indexado por coordenada exacta, deliberadamente NO por celda redondeada.
         self._cache: Dict[tuple, Optional[Dict[str, str]]] = {}
         self._lock = threading.Lock()
@@ -108,18 +106,16 @@ class GeoCodeClient:
             )
             return None
 
-        if self._cache_enabled:
-            with self._lock:
-                if key in self._cache:
-                    self.hits += 1
-                    return self._cache[key]
+        with self._lock:
+            if key in self._cache:
+                self.hits += 1
+                return self._cache[key]
 
         self.misses += 1
         result = self._fetch(latitude, longitude)
 
-        if self._cache_enabled:
-            with self._lock:
-                self._cache[key] = result
+        with self._lock:
+            self._cache[key] = result
         return result
 
     def _throttle(self) -> None:
@@ -184,9 +180,3 @@ class GeoCodeClient:
     def cache_stats(self) -> Dict[str, int]:
         with self._lock:
             return {"hits": self.hits, "misses": self.misses, "size": len(self._cache)}
-
-    def clear_cache(self) -> None:
-        with self._lock:
-            self._cache.clear()
-            self.hits = 0
-            self.misses = 0

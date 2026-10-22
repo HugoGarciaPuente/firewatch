@@ -31,18 +31,14 @@ class WeatherClient:
         client: Optional[httpx.Client] = None,
         base_url: Optional[str] = None,
         cell_degrees: Optional[float] = None,
-        cache_enabled: bool = True,
     ):
         self._client = client or httpx.Client()
         self.base_url = (base_url or settings.OPEN_METEO_BASE_URL).rstrip("/")
         self.cell_degrees = (
             cell_degrees if cell_degrees is not None else float(settings.WEATHER_CACHE_CELL)
         )
-        self._cache_enabled = cache_enabled
         self._cache: Dict[tuple, Optional[Dict[str, float]]] = {}
         self._lock = threading.Lock()
-        self.hits = 0
-        self.misses = 0
 
     def _cell(self, latitude: float, longitude: float) -> tuple:
         """Ajusta las coordenadas a una celda de cuadrícula para compartir consultas cercanas."""
@@ -69,18 +65,14 @@ class WeatherClient:
         """
         key = self._cell(latitude, longitude)
 
-        if self._cache_enabled:
-            with self._lock:
-                if key in self._cache:
-                    self.hits += 1
-                    return self._cache[key]
+        with self._lock:
+            if key in self._cache:
+                return self._cache[key]
 
-        self.misses += 1
         result = self._fetch(latitude, longitude)
 
-        if self._cache_enabled:
-            with self._lock:
-                self._cache[key] = result
+        with self._lock:
+            self._cache[key] = result
         return result
 
     def _fetch(self, latitude: float, longitude: float) -> Optional[Dict[str, float]]:
@@ -102,13 +94,3 @@ class WeatherClient:
         except Exception as exc:
             logger.warning("Consulta meteorológica fallida para (%.4f, %.4f): %s", latitude, longitude, exc)
             return None
-
-    def cache_stats(self) -> Dict[str, int]:
-        with self._lock:
-            return {"hits": self.hits, "misses": self.misses, "size": len(self._cache)}
-
-    def clear_cache(self) -> None:
-        with self._lock:
-            self._cache.clear()
-            self.hits = 0
-            self.misses = 0

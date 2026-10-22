@@ -165,7 +165,6 @@ def test_weather_client_caches_per_cell():
     client.get_weather(40.4100, -3.6900)
 
     assert calls["n"] == 1
-    assert client.cache_stats() == {"hits": 2, "misses": 1, "size": 1}
 
 
 def test_weather_client_caches_failures():
