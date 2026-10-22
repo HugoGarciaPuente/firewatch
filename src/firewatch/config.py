@@ -45,10 +45,9 @@ class Settings:
         "FIREWATCH_REGIONS", "peninsula,peninsula_sur,canarias,baleares"
     )
 
-    # Kafka (Fase 1: topic de ingesta; Fase 2: topic de alertas)
+    # Kafka
     KAFKA_BOOTSTRAP_SERVERS: str = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
     KAFKA_INGEST_TOPIC: str = os.getenv("KAFKA_INGEST_TOPIC", "firms-ingest")
-    KAFKA_RISK_TOPIC: str = os.getenv("KAFKA_RISK_TOPIC", "fire-risk-alerts")
 
     # Adaptador de meteorología / Open-Meteo (Fase 2)
     OPEN_METEO_BASE_URL: str = os.getenv(

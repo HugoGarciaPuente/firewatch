@@ -221,7 +221,6 @@ def consume_and_process(
     max_empty_polls: Optional[int] = None,
     weather_client=None,
     geocode_client=None,
-    alert_producer=None,
 ) -> int:
     """
     Consume mensajes de Kafka, evalúa el riesgo físico y los persiste en PostgreSQL/PostGIS.
@@ -297,7 +296,7 @@ def consume_and_process(
 
                     # Un registro malformado no debe detener el consumidor
                     try:
-                        risk = upsert_record(conn, record, weather=weather, location=location)
+                        upsert_record(conn, record, weather=weather, location=location)
                     except InvalidRecord as exc:
                         skipped += 1
                         logger.error("Discarding invalid FIRMS record: %s", exc)
@@ -312,21 +311,6 @@ def consume_and_process(
                         continue
 
                     processed += 1
-
-                    # Publicar alertas de riesgo para eventos high/extreme si el productor está configurado
-                    if alert_producer is not None and risk.get("risk_level") in ("high", "extreme"):
-                        alert_topic = getattr(settings, "KAFKA_RISK_TOPIC", "fire-risk-alerts")
-                        try:
-                            alert_producer.send(alert_topic, {
-                                "latitude": float(record.get("latitude") or 0),
-                                "longitude": float(record.get("longitude") or 0),
-                                "acq_date": str(record.get("acq_date") or ""),
-                                "risk_level": risk["risk_level"],
-                                "risk_score": risk["score"],
-                                "factors": risk.get("factors", {}),
-                            })
-                        except Exception as exc:
-                            logger.warning("Failed to publish alert to topic %s: %s", alert_topic, exc)
 
                     if batch_limit is not None and processed >= batch_limit:
                         break

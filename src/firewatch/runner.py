@@ -303,25 +303,13 @@ def cmd_process(args: argparse.Namespace) -> int:
         group_id="firewatch-processing",
     )
 
-    # Conectar el productor de alertas para que los eventos high/extreme alcancen fire-risk-alerts.
-    alert_producer = None
-    if not args.no_alerts:
-        try:
-            alert_producer = create_producer()
-            logger.info("Publishing risk alerts to topic '%s'", settings.KAFKA_RISK_TOPIC)
-        except Exception as exc:
-            logger.warning("Alert producer unavailable, continuing without alerts: %s", exc)
-
     try:
         processed = consume_and_process(
             consumer=consumer,
             batch_limit=args.limit,
             max_empty_polls=args.max_empty_polls,
-            alert_producer=alert_producer,
         )
     finally:
-        if alert_producer is not None:
-            alert_producer.close()
         consumer.close()
 
     logger.info("Processed %d messages. Exiting.", processed)
@@ -522,11 +510,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Salir tras N encuestas vacías consecutivas (útil para CI; por defecto: indefinido)",
-    )
-    p_process.add_argument(
-        "--no-alerts",
-        action="store_true",
-        help=f"No publicar eventos high/extreme en {settings.KAFKA_RISK_TOPIC}",
     )
     p_process.set_defaults(func=cmd_process)
 

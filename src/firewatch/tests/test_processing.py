@@ -2,7 +2,7 @@
 
 import pytest
 
-from firewatch.config import resolve_regions, settings
+from firewatch.config import resolve_regions
 from firewatch.services.processing import (
     InvalidRecord,
     _ensure_table,
@@ -171,7 +171,7 @@ def test_consume_and_process_handles_empty_poll():
     assert processed == 0
 
 # ---------------------------------------------------------------------------
-# Audit fixes: input validation, poison-pill resilience, alert wiring
+# Audit fixes: input validation, poison-pill resilience
 # ---------------------------------------------------------------------------
 
 
@@ -244,56 +244,6 @@ def test_invalid_record_does_not_kill_the_consumer():
         p for kind, sql, p in conn.log if kind == "execute" and "INSERT INTO fire_events" in sql
     ]
     assert len(upserts) == 1
-
-
-def test_high_risk_event_publishes_alert():
-    """Regression: alert_producer was never wired, so the topic stayed empty."""
-    hot = {"acq_date": "2026-10-08", "latitude": 40.0, "longitude": -3.0, "brightness": 395.0}
-    conn = FakeConn()
-    consumer = FakeConsumer([{("firms-ingest", 0): [FakeMessage(hot)]}])
-
-    sent = []
-
-    class FakeAlertProducer:
-        def send(self, topic, payload):
-            sent.append((topic, payload))
-
-    processed = consume_and_process(
-        consumer=consumer,
-        conn=conn,
-        batch_limit=1,
-        max_empty_polls=1,
-        alert_producer=FakeAlertProducer(),
-    )
-
-    assert processed == 1
-    assert len(sent) == 1
-    topic, payload = sent[0]
-    assert topic == settings.KAFKA_RISK_TOPIC
-    assert payload["risk_level"] in ("high", "extreme")
-    assert payload["latitude"] == 40.0
-
-
-def test_low_risk_event_does_not_publish_alert():
-    cool = {"acq_date": "2026-10-08", "latitude": 40.0, "longitude": -3.0, "brightness": 301.0}
-    conn = FakeConn()
-    consumer = FakeConsumer([{("firms-ingest", 0): [FakeMessage(cool)]}])
-
-    sent = []
-
-    class FakeAlertProducer:
-        def send(self, topic, payload):
-            sent.append((topic, payload))
-
-    consume_and_process(
-        consumer=consumer,
-        conn=conn,
-        batch_limit=1,
-        max_empty_polls=1,
-        alert_producer=FakeAlertProducer(),
-    )
-
-    assert sent == []
 
 
 def test_trigger_ingest_defaults_to_regions_not_the_whole_planet():

@@ -9,7 +9,7 @@ NASA FIRMS -> ingesta -> Kafka -> procesador (+ Open-Meteo) -> PostgreSQL/PostGI
 ```
 
 1. El servicio de ingesta pide a FIRMS los focos de las últimas fechas y los publica en un topic de Kafka.
-2. El procesador los consume, consulta temperatura, humedad y viento, calcula el riesgo y guarda el resultado en PostGIS. Los focos de riesgo alto o extremo se publican además en el topic `fire-risk-alerts`.
+2. El procesador los consume, consulta temperatura, humedad y viento, calcula el riesgo y guarda el resultado en PostGIS.
 3. La API expone los datos y sirve un dashboard con Leaflet (mapa de puntos, mapa de calor, clústeres y un calendario para elegir el día).
 
 El riesgo es un score de 0 a 1 que combina la temperatura de brillo del satélite, el viento y la humedad del combustible fino (fórmula de Simard). Se clasifica en `low`, `moderate`, `high` o `extreme`.
