@@ -288,7 +288,9 @@ def consume_and_process(
                         lat = float(record.get("latitude") or record.get("lat") or 0)
                         lon = float(record.get("longitude") or record.get("lon") or 0)
                         if weather_client is not None:
-                            weather = weather_client.get_weather(lat, lon)
+                            weather = weather_client.get_weather(
+                                lat, lon, date=record.get("acq_date")
+                            )
                         if geocode_client is not None:
                             location = geocode_client.get_location(lat, lon)
                     except Exception as exc:

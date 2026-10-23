@@ -133,9 +133,11 @@ resolves scope (`--bbox` > `--regions` > `FIREWATCH_REGIONS`); it lives in
 - **FIRMS reissues recent days** as the product matures. `runner daily`
   deliberately re-fetches the trailing window; the upsert is idempotent so
   this only refreshes risk values.
-- **Cache outbound weather calls.** A backfill is thousands of records; one
-  Open-Meteo request per record would hammer a free public API. Failures are
-  cached too, so a dead upstream does not retry per record.
+- **Cache outbound weather calls by `(cell, date)`.** A backfill is thousands
+  of records; one Open-Meteo request per record would hammer a free public API.
+  The date is part of the key: a fire from 7 October must not be scored with the
+  weather of the day the backfill runs. Failures are cached for 5 minutes, so a
+  dead upstream does not retry per record but also does not poison the whole run.
 - **FIRMS gives an anomaly point, not a fire perimeter.** Do not draw
   polygons to "show the affected area": a convex hull over distant points
   represents no real zone, and an arbitrary buffer is invented geometry. An

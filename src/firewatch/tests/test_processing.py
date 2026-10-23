@@ -88,6 +88,18 @@ class FakeMessage:
         return self._value
 
 
+class StubWeather:
+    """No network: tests must never build a real WeatherClient."""
+
+    def get_weather(self, lat, lon, date=None):
+        return None
+
+
+class StubGeocode:
+    def get_location(self, lat, lon):
+        return None
+
+
 class FakeConsumer:
     def __init__(self, batches):
         # batches: list of {("topic", 0): [messages]} returned per poll
@@ -105,7 +117,13 @@ def test_consume_and_process_upserts_message(firms_sample):
         [{("firms-ingest", 0): [FakeMessage(firms_sample[0])]}]
     )
 
-    processed = consume_and_process(consumer=consumer, conn=conn, batch_limit=1)
+    processed = consume_and_process(
+        consumer=consumer,
+        conn=conn,
+        batch_limit=1,
+        weather_client=StubWeather(),
+        geocode_client=StubGeocode(),
+    )
 
     assert processed == 1
     # First statement: CREATE EXTENSION, then CREATE TABLE / INDEX
@@ -142,6 +160,7 @@ def test_consume_and_process_accepts_bytes_payload(firms_sample):
         consumer=consumer,
         conn=conn,
         batch_limit=1,
+        weather_client=StubWeather(),
         geocode_client=NoGeocode(),
     )
 
@@ -158,6 +177,44 @@ def test_consume_and_process_accepts_bytes_payload(firms_sample):
     assert upserts[0][-3] == -60.0  # longitude (x of ST_MakePoint)
     assert upserts[0][-2] == -3.1  # latitude (y of ST_MakePoint)
     assert upserts[0][-1] is None
+
+
+def test_consume_and_process_passes_the_acquisition_date_to_weather():
+    """A fire must be scored with the weather of its own day, not of the run."""
+    class RecordingWeather:
+        calls = []
+
+        def get_weather(self, lat, lon, date=None):
+            RecordingWeather.calls.append(date)
+            return None
+
+    conn = FakeConn()
+    consumer = FakeConsumer(
+        [
+            {
+                ("firms-ingest", 0): [
+                    FakeMessage(
+                        {
+                            "acq_date": "2026-10-07",
+                            "latitude": 40.0,
+                            "longitude": -3.0,
+                            "brightness": 350.0,
+                        }
+                    )
+                ]
+            }
+        ]
+    )
+
+    consume_and_process(
+        consumer=consumer,
+        conn=conn,
+        batch_limit=1,
+        weather_client=RecordingWeather(),
+        geocode_client=StubGeocode(),
+    )
+
+    assert RecordingWeather.calls == ["2026-10-07"]
 
 
 def test_consume_and_process_handles_empty_poll():
@@ -236,7 +293,12 @@ def test_invalid_record_does_not_kill_the_consumer():
     consumer = FakeConsumer([{("firms-ingest", 0): [FakeMessage(bad), FakeMessage(good)]}])
 
     processed = consume_and_process(
-        consumer=consumer, conn=conn, batch_limit=1, max_empty_polls=1
+        consumer=consumer,
+        conn=conn,
+        batch_limit=1,
+        max_empty_polls=1,
+        weather_client=StubWeather(),
+        geocode_client=StubGeocode(),
     )
 
     assert processed == 1  # the good record still made it through

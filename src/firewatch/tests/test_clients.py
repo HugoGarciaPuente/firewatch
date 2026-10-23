@@ -182,3 +182,116 @@ def test_weather_client_caches_failures():
     assert client.get_weather(40.4170, -3.7040) is None
 
     assert calls["n"] == 1
+
+
+def test_weather_client_uses_the_requested_date():
+    """A past date must query hourly data, not current conditions."""
+    from firewatch.clients.weather import WeatherClient
+
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["params"] = request.url.params
+        return httpx.Response(
+            200,
+            json={
+                "hourly": {
+                    "temperature_2m": [12.0, None, 28.5, 21.0],
+                    "relative_humidity_2m": [80.0, 65.0, 32.0, 45.0],
+                    "wind_speed_10m": [5.0, 12.0, 22.4, 9.0],
+                }
+            },
+        )
+
+    client = WeatherClient(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    data = client.get_weather(40.4168, -3.7038, date="2026-10-07")
+
+    assert seen["params"]["start_date"] == "2026-10-07"
+    assert seen["params"]["end_date"] == "2026-10-07"
+    assert "hourly" in seen["params"]
+    assert "current" not in seen["params"]
+    assert data == {
+        "temperature_c": 28.5,
+        "relative_humidity": 32.0,
+        "wind_speed_kmh": 22.4,
+    }
+
+
+def test_weather_client_cache_includes_the_date():
+    """The same cell on two different dates needs two lookups."""
+    from firewatch.clients.weather import WeatherClient
+
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(
+            200,
+            json={
+                "hourly": {
+                    "temperature_2m": [20.0],
+                    "relative_humidity_2m": [50.0],
+                    "wind_speed_10m": [10.0],
+                }
+            },
+        )
+
+    client = WeatherClient(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    client.get_weather(40.4168, -3.7038, date="2026-10-07")
+    client.get_weather(40.4170, -3.7040, date="2026-10-08")
+
+    assert calls["n"] == 2
+
+
+def test_weather_client_does_not_invent_missing_metrics():
+    """A partial payload must yield None, not plausible defaults."""
+    from firewatch.clients.weather import WeatherClient
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"current": {"temperature_2m": 28.5}})
+
+    client = WeatherClient(client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+    assert client.get_weather(40.4168, -3.7038) is None
+
+
+def test_weather_client_does_not_invent_missing_hourly_metrics():
+    """An empty or incomplete hourly block must not produce a fabricated day."""
+    from firewatch.clients.weather import WeatherClient
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "hourly": {
+                    "temperature_2m": [],
+                    "relative_humidity_2m": [],
+                    "wind_speed_10m": [],
+                }
+            },
+        )
+
+    client = WeatherClient(client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+    assert client.get_weather(40.4168, -3.7038, date="2026-10-07") is None
+
+
+def test_weather_client_retries_a_failure_after_the_ttl():
+    """A cached failure must expire instead of poisoning the whole run."""
+    from firewatch.clients.weather import WeatherClient
+
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(503)
+
+    client = WeatherClient(
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        failure_ttl=0.0,
+    )
+
+    assert client.get_weather(40.4168, -3.7038) is None
+    assert client.get_weather(40.4168, -3.7038) is None
+
+    assert calls["n"] == 2

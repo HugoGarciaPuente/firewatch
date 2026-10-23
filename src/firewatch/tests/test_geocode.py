@@ -289,6 +289,10 @@ def test_consume_passes_the_location_through():
         def close(self):
             pass
 
+    class _Weather:
+        def get_weather(self, lat, lon, date=None):
+            return None
+
     class _Geo:
         def get_location(self, lat, lon):
             return {"locality": "Alarcon", "country_code": "es"}
@@ -298,7 +302,7 @@ def test_consume_passes_the_location_through():
         consumer=_Consumer(),
         conn=conn,
         batch_limit=1,
-        weather_client=None,
+        weather_client=_Weather(),
         geocode_client=_Geo(),
     )
     assert "Alarcon" in _insert_params(conn)[-1]
