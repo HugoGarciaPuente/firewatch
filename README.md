@@ -1,6 +1,6 @@
 # FireWatch
 
-Sistema de monitorización de incendios forestales en España. Descarga anomalías térmicas de satélite desde NASA FIRMS, les añade datos meteorológicos de Open-Meteo, calcula un índice de riesgo para cada foco y lo muestra en un mapa web.
+Sistema de monitorización de incendios forestales en España. Descarga anomalías térmicas de satélite desde NASA FIRMS, les añade datos meteorológicos de Open-Meteo (de la fecha y hora de cada foco), calcula un índice de riesgo para cada foco y lo muestra en un mapa web.
 
 ## Cómo funciona
 
@@ -9,10 +9,12 @@ NASA FIRMS -> ingesta -> Kafka -> procesador (+ Open-Meteo) -> PostgreSQL/PostGI
 ```
 
 1. El servicio de ingesta pide a FIRMS los focos de las últimas fechas y los publica en un topic de Kafka.
-2. El procesador los consume, consulta temperatura, humedad y viento, calcula el riesgo y guarda el resultado en PostGIS.
+2. El procesador los consume, consulta temperatura, humedad y viento para la fecha y hora del sobrevuelo, calcula el riesgo y guarda el resultado en PostGIS.
 3. La API expone los datos y sirve un dashboard con Leaflet (mapa de puntos, mapa de calor, clústeres y un calendario para elegir el día).
 
 El riesgo es un score de 0 a 1 que combina la temperatura de brillo del satélite, el viento y la humedad del combustible fino (fórmula de Simard). Se clasifica en `low`, `moderate`, `high` o `extreme`.
+
+El clima se pide para el día del foco y, cuando FIRMS da `acq_time`, para la hora del sobrevuelo (UTC): un foco nocturno se puntúa con la noche, no con el máximo de la tarde. Si no hay hora, se usan los extremos del día (máxima temperatura, mínima humedad y máximo viento).
 
 La zona vigilada es España: península, Baleares y Canarias. Las cajas geográficas están ajustadas para dejar fuera la costa de Argelia.
 
@@ -36,7 +38,7 @@ Código:
 src/firewatch/
 ├── config.py        # configuración y bounding boxes
 ├── runner.py        # CLI (ingest, backfill, daily, process, geocode-backfill)
-├── clients/         # FIRMS, Open-Meteo (con caché por celda de 0.25°), Nominatim
+├── clients/         # FIRMS, Open-Meteo (caché por celda 0.25° y fecha), Nominatim
 ├── services/        # ingestion, processing, risk
 ├── api/             # app FastAPI, endpoints, autenticación, rate limit
 ├── static/          # dashboard (HTML, JS, CSS)

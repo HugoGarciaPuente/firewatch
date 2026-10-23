@@ -290,7 +290,7 @@ def test_consume_passes_the_location_through():
             pass
 
     class _Weather:
-        def get_weather(self, lat, lon, date=None):
+        def get_weather(self, lat, lon, date=None, acq_time=None):
             return None
 
     class _Geo:

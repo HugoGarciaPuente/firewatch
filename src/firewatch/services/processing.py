@@ -289,7 +289,10 @@ def consume_and_process(
                         lon = float(record.get("longitude") or record.get("lon") or 0)
                         if weather_client is not None:
                             weather = weather_client.get_weather(
-                                lat, lon, date=record.get("acq_date")
+                                lat,
+                                lon,
+                                date=record.get("acq_date"),
+                                acq_time=record.get("acq_time"),
                             )
                         if geocode_client is not None:
                             location = geocode_client.get_location(lat, lon)

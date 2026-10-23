@@ -10,8 +10,11 @@ significativamente en unos pocos kilómetros, manteniendo las peticiones HTTP pr
 al número de celdas distintas en lugar de al número de focos detectados.
 
 La fecha forma parte de la clave: un incendio del 7 de octubre se puntúa con el clima de ese
-día, no con el que haga el día en que se ejecuta el backfill. Sin fecha se consultan las
-condiciones actuales, útil para comprobaciones manuales.
+día, no con el que haga el día en que se ejecuta el backfill. Con fecha se descarga la serie
+horaria completa y se selecciona la hora del sobrevuelo del satélite (``acq_time``); los
+focos nocturnos se puntúan con la noche, no con el máximo de la tarde. Sin ``acq_time`` se
+usan los extremos del día (máxima temperatura, mínima humedad, máximo viento), que es la
+agregación conservadora estándar de los índices de peligro.
 
 Si la fecha queda fuera de la ventana histórica que cubre ``OPEN_METEO_BASE_URL``, la
 petición falla y se devuelve ``None``; el histórico antiguo requiere la API de archivo (ERA5).
@@ -50,7 +53,8 @@ class WeatherClient:
             cell_degrees if cell_degrees is not None else float(settings.WEATHER_CACHE_CELL)
         )
         self.failure_ttl = failure_ttl
-        self._cache: Dict[tuple, Dict[str, float]] = {}
+        # Con fecha se guarda la serie horaria completa; sin fecha, las métricas actuales.
+        self._cache: Dict[tuple, Dict] = {}
         self._failures: Dict[tuple, float] = {}
         self._lock = threading.Lock()
 
@@ -66,56 +70,66 @@ class WeatherClient:
         latitude: float,
         longitude: float,
         date: Optional[str] = None,
+        acq_time: Optional[str] = None,
     ) -> Optional[Dict[str, float]]:
         """
-        Obtiene las condiciones meteorológicas para las coordenadas y la fecha dadas.
+        Obtiene las condiciones meteorológicas para las coordenadas, la fecha y la hora dadas.
 
         Parámetros
         ----------
         date : str, opcional
             Fecha ISO (``YYYY-MM-DD``) del incendio. Si se omite, se consultan las
-            condiciones actuales. Con fecha se piden las 24 horas de ese día y se
-            agregan a los extremos que alimentan el índice de peligro.
+            condiciones actuales.
+        acq_time : str, opcional
+            Hora UTC del sobrevuelo en formato HHMM de FIRMS (``"1345"``, ``"211"``).
+            Se selecciona la hora entera más cercana. Si se omite o no es válida, se
+            usan los extremos del día.
 
         Retorna
         -------
         dict o None
             {
-                "temperature_c": float,       # máxima del día (o actual sin fecha)
-                "relative_humidity": float,   # mínima del día (o actual sin fecha)
-                "wind_speed_kmh": float,      # máxima del día (o actual sin fecha)
+                "temperature_c": float,       # hora del sobrevuelo o máxima del día
+                "relative_humidity": float,   # hora del sobrevuelo o mínima del día
+                "wind_speed_kmh": float,      # hora del sobrevuelo o máximo del día
             }
 
-        Los resultados se cachean por ``(celda, fecha)``. Los fallos se cachean unos
-        minutos: una caída del upstream no provoca un reintento por registro, pero
-        tampoco envenena la caché durante todo el proceso.
+        La serie horaria se cachea por ``(celda, fecha)``, de modo que dos focos de la
+        misma celda y día con horas distintas comparten una sola petición HTTP. Los
+        fallos se cachean unos minutos: una caída del upstream no provoca un reintento
+        por registro, pero tampoco envenena la caché durante todo el proceso.
         """
         date_key = str(date)[:10] if date is not None else None
         key = self._cell(latitude, longitude) + (date_key,)
 
         with self._lock:
-            if key in self._cache:
-                return self._cache[key]
-            failed_at = self._failures.get(key)
-            if failed_at is not None and (time.monotonic() - failed_at) < self.failure_ttl:
+            cached = self._cache.get(key)
+            if cached is None:
+                failed_at = self._failures.get(key)
+                if failed_at is not None and (time.monotonic() - failed_at) < self.failure_ttl:
+                    return None
+
+        if cached is None:
+            cached = self._fetch(latitude, longitude, date_key)
+            with self._lock:
+                if cached is None:
+                    self._failures[key] = time.monotonic()
+                else:
+                    self._cache[key] = cached
+                    self._failures.pop(key, None)
+            if cached is None:
                 return None
 
-        result = self._fetch(latitude, longitude, date_key)
-
-        with self._lock:
-            if result is None:
-                self._failures[key] = time.monotonic()
-            else:
-                self._cache[key] = result
-                self._failures.pop(key, None)
-        return result
+        if date_key is None:
+            return cached
+        return _metrics_at_hour(cached, _acq_hour(acq_time))
 
     def _fetch(
         self,
         latitude: float,
         longitude: float,
         date: Optional[str] = None,
-    ) -> Optional[Dict[str, float]]:
+    ) -> Optional[Dict]:
         params = {
             "latitude": round(latitude, 4),
             "longitude": round(longitude, 4),
@@ -123,11 +137,12 @@ class WeatherClient:
         if date is None:
             params["current"] = "temperature_2m,relative_humidity_2m,wind_speed_10m"
         else:
-            # Las 24 h del día, agregadas a los extremos del índice de peligro:
-            # máxima temperatura, mínima humedad y máximo viento.
+            # 24 h del día en UTC: FIRMS da acq_time en UTC y Open-Meteo usa GMT por
+            # defecto, así que la hora del sobrevuelo se indexa sin conversión.
             params["hourly"] = "temperature_2m,relative_humidity_2m,wind_speed_10m"
             params["start_date"] = date
             params["end_date"] = date
+            params["timezone"] = "GMT"
 
         try:
             response = self._client.get(self.base_url, params=params, timeout=10.0)
@@ -149,7 +164,62 @@ class WeatherClient:
 
         if date is None:
             return _current_metrics(data.get("current") or {})
-        return _daily_extremes(data.get("hourly") or {})
+
+        hourly = data.get("hourly") or {}
+        return hourly if _has_hourly_series(hourly) else None
+
+
+def _acq_hour(acq_time: Optional[str]) -> Optional[int]:
+    """Hora UTC (0-23) más cercana al sobrevuelo a partir del HHMM de FIRMS.
+
+    FIRMS no rellena con ceros: ``"211"`` es 02:11, no 21:10. Por eso se parsea
+    como entero y se separan las dos últimas cifras como minutos.
+    """
+    if acq_time is None:
+        return None
+    try:
+        value = int(str(acq_time).strip())
+    except (TypeError, ValueError):
+        return None
+    if not 0 <= value <= 2359:
+        return None
+    hour, minute = divmod(value, 100)
+    if hour > 23 or minute > 59:
+        return None
+    return min(23, int(round(hour + minute / 60.0)))
+
+
+def _has_hourly_series(hourly: Dict) -> bool:
+    """Comprueba que la respuesta trae las tres series con algún valor útil."""
+    try:
+        return all(
+            isinstance(hourly[key], list) and any(v is not None for v in hourly[key])
+            for key in ("temperature_2m", "relative_humidity_2m", "wind_speed_10m")
+        )
+    except (KeyError, TypeError):
+        return False
+
+
+def _metrics_at_hour(hourly: Dict, hour: Optional[int]) -> Optional[Dict[str, float]]:
+    """Selecciona la hora del sobrevuelo; sin hora, cae a los extremos del día."""
+    if hour is None:
+        return _daily_extremes(hourly)
+
+    try:
+        temperature = hourly["temperature_2m"][hour]
+        humidity = hourly["relative_humidity_2m"][hour]
+        wind = hourly["wind_speed_10m"][hour]
+    except (KeyError, IndexError, TypeError):
+        return None
+
+    if temperature is None or humidity is None or wind is None:
+        return None
+
+    return {
+        "temperature_c": float(temperature),
+        "relative_humidity": float(humidity),
+        "wind_speed_kmh": float(wind),
+    }
 
 
 def _current_metrics(current: Dict) -> Optional[Dict[str, float]]:

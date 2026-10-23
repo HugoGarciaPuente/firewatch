@@ -208,6 +208,7 @@ def test_weather_client_uses_the_requested_date():
 
     assert seen["params"]["start_date"] == "2026-10-07"
     assert seen["params"]["end_date"] == "2026-10-07"
+    assert seen["params"]["timezone"] == "GMT"
     assert "hourly" in seen["params"]
     assert "current" not in seen["params"]
     assert data == {
@@ -215,6 +216,63 @@ def test_weather_client_uses_the_requested_date():
         "relative_humidity": 32.0,
         "wind_speed_kmh": 22.4,
     }
+
+
+def test_weather_client_uses_the_overpass_hour():
+    """With acq_time, pick the hour nearest the overpass, not the daily maximum."""
+    from firewatch.clients.weather import WeatherClient
+
+    payload = {
+        "hourly": {
+            "time": [f"2026-10-07T{h:02d}:00" for h in range(24)],
+            "temperature_2m": [10.0 + h for h in range(24)],
+            "relative_humidity_2m": [90.0 - h for h in range(24)],
+            "wind_speed_10m": [1.0 + h * 0.5 for h in range(24)],
+        }
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    client = WeatherClient(client=httpx.Client(transport=httpx.MockTransport(handler)))
+    data = client.get_weather(40.4168, -3.7038, date="2026-10-07", acq_time="1345")
+
+    # 13:45 is 15 minutes from 14:00 and 45 from 13:00.
+    assert data == {
+        "temperature_c": 24.0,
+        "relative_humidity": 76.0,
+        "wind_speed_kmh": 8.0,
+    }
+
+
+def test_weather_client_shares_the_hourly_series_across_overpass_times():
+    """One request per cell/day, but each fire keeps the weather of its own hour."""
+    from firewatch.clients.weather import WeatherClient
+
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(
+            200,
+            json={
+                "hourly": {
+                    "time": [f"2026-10-07T{h:02d}:00" for h in range(24)],
+                    "temperature_2m": [10.0 + h for h in range(24)],
+                    "relative_humidity_2m": [90.0 - h for h in range(24)],
+                    "wind_speed_10m": [1.0 + h * 0.5 for h in range(24)],
+                }
+            },
+        )
+
+    client = WeatherClient(client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+    night = client.get_weather(40.4168, -3.7038, date="2026-10-07", acq_time="0200")
+    day = client.get_weather(40.4170, -3.7040, date="2026-10-07", acq_time="1400")
+
+    assert calls["n"] == 1
+    assert night["temperature_c"] == 12.0
+    assert day["temperature_c"] == 24.0
 
 
 def test_weather_client_cache_includes_the_date():

@@ -91,7 +91,7 @@ class FakeMessage:
 class StubWeather:
     """No network: tests must never build a real WeatherClient."""
 
-    def get_weather(self, lat, lon, date=None):
+    def get_weather(self, lat, lon, date=None, acq_time=None):
         return None
 
 
@@ -179,13 +179,13 @@ def test_consume_and_process_accepts_bytes_payload(firms_sample):
     assert upserts[0][-1] is None
 
 
-def test_consume_and_process_passes_the_acquisition_date_to_weather():
-    """A fire must be scored with the weather of its own day, not of the run."""
+def test_consume_and_process_passes_the_acquisition_time_to_weather():
+    """A fire must be scored with the weather of its own day and overpass hour."""
     class RecordingWeather:
         calls = []
 
-        def get_weather(self, lat, lon, date=None):
-            RecordingWeather.calls.append(date)
+        def get_weather(self, lat, lon, date=None, acq_time=None):
+            RecordingWeather.calls.append((date, acq_time))
             return None
 
     conn = FakeConn()
@@ -196,6 +196,7 @@ def test_consume_and_process_passes_the_acquisition_date_to_weather():
                     FakeMessage(
                         {
                             "acq_date": "2026-10-07",
+                            "acq_time": "211",
                             "latitude": 40.0,
                             "longitude": -3.0,
                             "brightness": 350.0,
@@ -214,7 +215,7 @@ def test_consume_and_process_passes_the_acquisition_date_to_weather():
         geocode_client=StubGeocode(),
     )
 
-    assert RecordingWeather.calls == ["2026-10-07"]
+    assert RecordingWeather.calls == [("2026-10-07", "211")]
 
 
 def test_consume_and_process_handles_empty_poll():

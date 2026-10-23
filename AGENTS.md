@@ -25,7 +25,7 @@ firewatch/
 │   │   ├── clients/            # External API clients (all outbound calls here)
 │   │   │   ├── __init__.py
 │   │   │   ├── firms.py        # NASA FIRMS API client
-│   │   │   ├── weather.py      # Open-Meteo client, cached per (0.25° cell, date)
+│   │   │   ├── weather.py      # Open-Meteo hourly series, cached per (0.25° cell, date)
 │   │   │   └── geocode.py      # Nominatim reverse geocoding, cached per exact point
 │   │   ├── services/           # Business services
 │   │   │   ├── __init__.py
@@ -86,7 +86,7 @@ resolves scope (`--bbox` > `--regions` > `FIREWATCH_REGIONS`); it lives in
 - `docker compose logs -f refresh` - Watch the FIRMS refresh loop
 - `docker compose ps` - Confirm the five services are up (only `api`, `postgres` and `kafka` expose a healthcheck)
 - `pip install -e .` or `pip install -r requirements-dev.txt` - Local dev setup
-- `pytest` - Run tests (120 tests, no live services required)
+- `pytest` - Run tests (122 tests, no live services required)
 - `python -m firewatch.runner ingest` - One-shot FIRMS fetch -> Kafka
 - `python -m firewatch.runner backfill --start-date D --end-date D` - Historical load (one request per day)
 - `python -m firewatch.runner daily --days 3` - Loop that keeps data fresh
@@ -133,11 +133,19 @@ resolves scope (`--bbox` > `--regions` > `FIREWATCH_REGIONS`); it lives in
 - **FIRMS reissues recent days** as the product matures. `runner daily`
   deliberately re-fetches the trailing window; the upsert is idempotent so
   this only refreshes risk values.
-- **Cache outbound weather calls by `(cell, date)`.** A backfill is thousands
+- **Cache the hourly weather series by `(cell, date)`.** A backfill is thousands
   of records; one Open-Meteo request per record would hammer a free public API.
   The date is part of the key: a fire from 7 October must not be scored with the
-  weather of the day the backfill runs. Failures are cached for 5 minutes, so a
-  dead upstream does not retry per record but also does not poison the whole run.
+  weather of the day the backfill runs. One request returns the 24 h of that day;
+  `get_weather(..., acq_time=...)` selects the hour nearest the overpass, and
+  without a valid `acq_time` it falls back to daily extremes. Failures are cached
+  for 5 minutes, so a dead upstream does not retry per record but also does not
+  poison the whole run.
+- **FIRMS `acq_time` is HHMM UTC without zero padding.** `"211"` is 02:11, not
+  21:10: parse it as an integer and treat the last two digits as minutes.
+  Open-Meteo is requested with `timezone=GMT`, so no conversion is needed. A
+  night overpass must be scored with the night weather, not with the afternoon
+  maximum.
 - **FIRMS gives an anomaly point, not a fire perimeter.** Do not draw
   polygons to "show the affected area": a convex hull over distant points
   represents no real zone, and an arbitrary buffer is invented geometry. An
