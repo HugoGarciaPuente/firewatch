@@ -56,7 +56,6 @@ def run_ingestion(
     records: Iterable[Dict],
     producer,
     topic: str | None = None,
-    flush: bool = True,
 ) -> int:
     """
     Publica un lote de registros de FIRMS en Kafka.
@@ -68,7 +67,9 @@ def run_ingestion(
     for record in records:
         publish_ingest(producer, record, topic=topic)
         count += 1
-    if flush:
-        producer.flush()
+
+    # Every record was already acked by publish_ingest, so this buffer is empty;
+    # the call stays as a guard in case publishing ever becomes asynchronous.
+    producer.flush()
     logger.info("Ingested %s FIRMS records into Kafka", count)
     return count
