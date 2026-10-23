@@ -25,7 +25,7 @@ firewatch/
 │   │   ├── clients/            # External API clients (all outbound calls here)
 │   │   │   ├── __init__.py
 │   │   │   ├── firms.py        # NASA FIRMS API client
-│   │   │   ├── weather.py      # Open-Meteo client, cached per 0.25° cell
+│   │   │   ├── weather.py      # Open-Meteo client, cached per (0.25° cell, date)
 │   │   │   └── geocode.py      # Nominatim reverse geocoding, cached per exact point
 │   │   ├── services/           # Business services
 │   │   │   ├── __init__.py
@@ -86,7 +86,7 @@ resolves scope (`--bbox` > `--regions` > `FIREWATCH_REGIONS`); it lives in
 - `docker compose logs -f refresh` - Watch the FIRMS refresh loop
 - `docker compose ps` - Confirm the five services are up (only `api`, `postgres` and `kafka` expose a healthcheck)
 - `pip install -e .` or `pip install -r requirements-dev.txt` - Local dev setup
-- `pytest` - Run tests (114 tests, no live services required)
+- `pytest` - Run tests (120 tests, no live services required)
 - `python -m firewatch.runner ingest` - One-shot FIRMS fetch -> Kafka
 - `python -m firewatch.runner backfill --start-date D --end-date D` - Historical load (one request per day)
 - `python -m firewatch.runner daily --days 3` - Loop that keeps data fresh
