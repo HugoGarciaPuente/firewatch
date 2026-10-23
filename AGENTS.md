@@ -173,8 +173,10 @@ resolves scope (`--bbox` > `--regions` > `FIREWATCH_REGIONS`); it lives in
   is on, so deleting a topic is not enough: a producer still running on an old
   image recreates it with the next message. Rebuild and restart the publishers
   first, then delete the topic.
-- **FIRMS has no data for the current day.** `last_date` normally trails by
-  one day; that is NRT latency, not a bug.
+- **FIRMS NRT data for the current day is incomplete.** Early in the day it can
+  be empty and `last_date` may trail by one day; that is latency, not a bug.
+  Later in the day the first overpasses do appear (21 records on 2026-10-23), so
+  do not assume today is always absent.
 - **Recent days change size a lot.** On 2026-10-08, re-fetching 2026-10-07
   went from 6 stored records to 50 available (31 of them `high`). Re-running
   the refresh is the entire point.
