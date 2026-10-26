@@ -60,6 +60,7 @@ class StatsPage {
     this.scope = document.getElementById('stats-scope');
     this.latestDate = null;
     this.firstDate = null;
+    this.requestId = 0;
   }
 
   async init() {
@@ -185,6 +186,10 @@ class StatsPage {
   }
 
   async loadStats() {
+    // Cambiar provincia y periodo seguidos lanza dos fetches. Sin este guardia,
+    // la respuesta lenta del filtro anterior puede sobrescribir la nueva.
+    this.requestId += 1;
+    const requestId = this.requestId;
     const range = this.currentRange();
 
     if (!range) {
@@ -201,9 +206,15 @@ class StatsPage {
 
     try {
       const data = await fetchJson(`/api/v1/fire/locality-stats?${query.toString()}`);
+      if (requestId !== this.requestId) {
+        return;
+      }
       this.render(data);
       this.scope.textContent = this.describeScope(range, data);
     } catch (error) {
+      if (requestId !== this.requestId) {
+        return;
+      }
       this.scope.textContent = 'No se pudieron cargar las estadísticas';
       console.error(error);
     }
