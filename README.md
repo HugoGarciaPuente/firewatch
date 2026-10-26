@@ -12,7 +12,7 @@ NASA FIRMS -> ingesta -> Kafka -> procesador (+ Open-Meteo) -> PostgreSQL/PostGI
 2. El procesador los consume, consulta temperatura, humedad y viento para la fecha y hora del sobrevuelo, calcula el riesgo y guarda el resultado en PostGIS.
 3. La API expone los datos y sirve un dashboard con Leaflet (mapa de puntos, mapa de calor, clústeres y un calendario para elegir el día).
 
-Desde el dashboard se accede a `/stats`, una sección de estadísticas agregadas por provincia y municipio (histórico completo o un día concreto), con distribución de riesgo, evolución diaria y rankings de focos.
+Desde el dashboard se accede a `/stats`, una sección de estadísticas agregadas por provincia y municipio (histórico completo o un día concreto, filtrable por país), con distribución de riesgo, evolución diaria y rankings de focos.
 
 El riesgo es un score de 0 a 1 que combina la temperatura de brillo del satélite, el viento y la humedad del combustible fino (fórmula de Simard). Se clasifica en `low`, `moderate`, `high` o `extreme`.
 

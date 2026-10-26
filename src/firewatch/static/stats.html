@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="/static/style.css?v=12">
+  <link rel="stylesheet" href="/static/style.css?v=13">
 </head>
 <body>
   <div class="app-container">
@@ -68,10 +68,19 @@
 
       <!-- Selector de periodo -->
       <section class="stats-toolbar">
+        <label for="stats-country">País</label>
+        <select id="stats-country" class="form-select">
+          <option value="es" selected>España</option>
+          <option value="pt">Portugal</option>
+          <option value="fr">Francia</option>
+          <option value="">Todos</option>
+        </select>
+
         <label for="stats-date">Periodo</label>
         <select id="stats-date" class="form-select">
           <option value="">Todo el histórico</option>
         </select>
+
         <span class="stats-toolbar-hint" id="stats-scope">Cargando…</span>
       </section>
 
@@ -129,6 +138,6 @@
     </main>
   </div>
 
-  <script src="/static/stats.js?v=1"></script>
+  <script src="/static/stats.js?v=2"></script>
 </body>
 </html>

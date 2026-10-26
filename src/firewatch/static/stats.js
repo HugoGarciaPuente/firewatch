@@ -37,6 +37,7 @@ async function fetchJson(url) {
 
 class StatsPage {
   constructor() {
+    this.countrySelect = document.getElementById('stats-country');
     this.dateSelect = document.getElementById('stats-date');
     this.scope = document.getElementById('stats-scope');
   }
@@ -47,6 +48,7 @@ class StatsPage {
       await fetch('/auth/logout', { method: 'POST' });
       location.replace('/login');
     });
+    this.countrySelect.addEventListener('change', () => this.loadStats());
     this.dateSelect.addEventListener('change', () => this.loadStats());
 
     await this.loadDates();
@@ -70,17 +72,23 @@ class StatsPage {
 
   async loadStats() {
     const date = this.dateSelect.value;
+    const country = this.countrySelect.value;
     this.scope.textContent = 'Cargando…';
     try {
       const query = new URLSearchParams({ limit: '15' });
       if (date) {
         query.set('date', date);
       }
+      if (country) {
+        query.set('country', country);
+      }
       const data = await fetchJson(`/api/v1/fire/locality-stats?${query.toString()}`);
       this.render(data);
-      this.scope.textContent = date
+      const period = date
         ? `Día ${this.formatDate(date)}`
         : `Histórico completo (${this.number(data.totals.days)} días)`;
+      const countryName = this.countrySelect.selectedOptions[0].textContent;
+      this.scope.textContent = country ? `${period} · ${countryName}` : `${period} · Todos los países`;
     } catch (error) {
       this.scope.textContent = 'No se pudieron cargar las estadísticas';
       console.error(error);

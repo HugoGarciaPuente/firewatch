@@ -860,6 +860,10 @@ body {
 
 .stats-toolbar .form-select {
   width: auto;
+  min-width: 160px;
+}
+
+#stats-date {
   min-width: 260px;
 }
 
