@@ -133,4 +133,4 @@ Salvo `/`, `/health`, `/health/db` y las rutas `/login` y `/auth/*`, todo requie
 python -m pytest
 ```
 
-Son 132 tests que no necesitan red ni contenedores: usan `httpx.MockTransport` y fakes en memoria para Kafka y la base de datos.
+Son 133 tests que no necesitan red ni contenedores: usan `httpx.MockTransport` y fakes en memoria para Kafka y la base de datos.

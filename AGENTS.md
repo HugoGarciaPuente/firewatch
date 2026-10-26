@@ -88,7 +88,7 @@ resolves scope (`--bbox` > `--regions` > `FIREWATCH_REGIONS`); it lives in
 - `docker compose logs -f refresh` - Watch the FIRMS refresh loop
 - `docker compose ps` - Confirm the five services are up (only `api`, `postgres` and `kafka` expose a healthcheck)
 - `pip install -e .` or `pip install -r requirements-dev.txt` - Local dev setup
-- `pytest` - Run tests (132 tests, no live services required)
+- `pytest` - Run tests (133 tests, no live services required)
 - `python -m firewatch.runner ingest` - One-shot FIRMS fetch -> Kafka
 - `python -m firewatch.runner backfill --start-date D --end-date D` - Historical load (one request per day)
 - `python -m firewatch.runner daily --days 3` - Loop that keeps data fresh

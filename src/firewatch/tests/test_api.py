@@ -1,6 +1,7 @@
 """Tests for the FastAPI app (no external services needed)."""
 
 import os
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -423,3 +424,17 @@ def test_login_page_does_not_depend_on_protected_static():
     body = client.get("/login").text
     assert "/static/style.css" not in body, "login page would render unstyled"
     assert "--bg-main" in body, "login page should carry its own variables"
+
+
+def test_stats_js_ignores_stale_filter_responses():
+    """Two quick filter changes must not let the older response repaint the page.
+
+    There is no JS runtime in the test image, so this pins the guard in the
+    asset; the browser-level check was done manually when the race was fixed.
+    """
+    source = (Path(__file__).resolve().parents[1] / "static" / "stats.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "this.requestId += 1" in source
+    assert "requestId !== this.requestId" in source
