@@ -290,15 +290,17 @@ class StatsPage {
     const max = Math.max(...provinces.map((province) => province.events), 1);
     list.innerHTML = provinces
       .map((province) => {
-        const sub =
-          province.community && province.community !== province.province
-            ? province.community
-            : province.country;
+        let sub = '';
+        if (province.country && province.country !== 'España') {
+          sub = province.country;
+        } else if (province.community && province.community !== province.province) {
+          sub = province.community;
+        }
         return `
           <div class="bar-row">
             <div class="bar-label" title="${escapeHtml(province.province)}">
               <span class="bar-name">${escapeHtml(province.province)}</span>
-              <span class="bar-sub">${escapeHtml(sub || '')}</span>
+              <span class="bar-sub">${escapeHtml(sub)}</span>
             </div>
             <div class="bar-track"
                  title="${province.events} focos · ${province.municipalities} municipios · ${province.high} alto+">
@@ -323,12 +325,20 @@ class StatsPage {
         <tr>
           <td class="num">${index + 1}</td>
           <td><strong>${escapeHtml(municipality.municipality)}</strong></td>
-          <td class="muted">${escapeHtml(municipality.province || municipality.country)}</td>
+          <td class="muted">${escapeHtml(this.placeLabel(municipality))}</td>
           <td class="num">${this.number(municipality.events)}</td>
           <td class="num">${this.number(municipality.high)}</td>
           <td class="num">${Number(municipality.max_risk_score || 0).toFixed(2)}</td>
         </tr>`)
       .join('');
+  }
+
+  placeLabel(item) {
+    const place = item.province || item.country || '';
+    if (item.country && item.country !== 'España') {
+      return place && place !== item.country ? `${place} (${item.country})` : item.country;
+    }
+    return place;
   }
 
   renderDaily(daily) {
