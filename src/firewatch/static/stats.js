@@ -250,10 +250,6 @@ class StatsPage {
     document.getElementById('stat-days').textContent = this.number(totals.days);
     document.getElementById('stat-high').textContent =
       this.number((levels.high || 0) + (levels.extreme || 0));
-    document.getElementById('stat-range').textContent =
-      totals.first_date && totals.last_date
-        ? `${this.formatDate(totals.first_date)} → ${this.formatDate(totals.last_date)}`
-        : 'Sin datos';
 
     this.renderRisk(levels);
     this.renderProvinces(provinces);
