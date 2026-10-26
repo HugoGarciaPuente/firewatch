@@ -107,6 +107,14 @@ def dashboard(_: str = Depends(require_session)):
     raise HTTPException(status_code=404, detail="Dashboard static files not found")
 
 
+@app.get("/stats", include_in_schema=False)
+def stats_page(_: str = Depends(require_session)):
+    """Sección de estadísticas agregadas por provincia y municipio. Requiere sesión."""
+    if STATIC_DIR.exists() and (STATIC_DIR / "stats.html").exists():
+        return FileResponse(STATIC_DIR / "stats.html")
+    raise HTTPException(status_code=404, detail="Statistics static files not found")
+
+
 @app.get("/health", include_in_schema=False)
 def health():
     """Sonda de salud básica del microservicio."""

@@ -60,6 +60,12 @@ def test_openapi_document_generated():
     # /stats accepts a day so the top KPIs follow the selected day
     stats_params = [p["name"] for p in paths["/api/v1/fire/stats"]["get"]["parameters"]]
     assert "date" in stats_params
+    # Statistics section: aggregated by province/municipality, optional day/country
+    assert "/api/v1/fire/locality-stats" in paths
+    locality_params = [
+        p["name"] for p in paths["/api/v1/fire/locality-stats"]["get"]["parameters"]
+    ]
+    assert {"date", "country", "limit"} <= set(locality_params)
 
 
 def test_dashboard_endpoint_requires_session(authed):
@@ -69,6 +75,15 @@ def test_dashboard_endpoint_requires_session(authed):
     response = authed.get("/dashboard")
     assert response.status_code == 200
     assert "FireWatch" in response.text
+
+
+def test_stats_page_requires_session(authed):
+    """The statistics page is another dashboard shell: it must not be public."""
+    assert client.get("/stats").status_code == 401
+
+    response = authed.get("/stats")
+    assert response.status_code == 200
+    assert "Estadísticas" in response.text
 
 
 def test_login_page_is_public():
@@ -83,9 +98,101 @@ def test_login_page_is_public():
 # ---------------------------------------------------------------------------
 
 
+def test_locality_stats_shapes_the_aggregations(authed, monkeypatch):
+    """The statistics endpoint must expose totals, levels, provinces, municipalities and daily."""
+    from datetime import date
+
+    from firewatch.api import endpoints as ep
+
+    class FakeCursor:
+        def __init__(self, calls):
+            self.calls = calls
+            self._rows = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params=None):
+            self.calls.append((sql, params))
+            if "COUNT(DISTINCT acq_date)" in sql:
+                self._rows = [
+                    (1017, 1014, 334, 36, 29, date(2026, 9, 28), date(2026, 10, 26), 0.91)
+                ]
+            elif "GROUP BY risk_level" in sql:
+                self._rows = [("high", 400), ("moderate", 350), ("low", 267)]
+            elif "GROUP BY 1, 2, 3, 4" in sql:
+                self._rows = [
+                    ("Cedillo", "Cáceres", "Extremadura", "España", 31, 10, 0.8)
+                ]
+            elif "GROUP BY 1, 2, 3" in sql:
+                self._rows = [
+                    ("Cáceres", "Extremadura", "España", 120, 15, 40, 0.82)
+                ]
+            elif "GROUP BY acq_date" in sql:
+                self._rows = [(date(2026, 9, 28), 30, 12, 0.8)]
+
+        def fetchone(self):
+            return self._rows[0]
+
+        def fetchall(self):
+            return self._rows
+
+    class FakeConn:
+        def __init__(self):
+            self.calls = []
+
+        def cursor(self, *args, **kwargs):
+            return FakeCursor(self.calls)
+
+        def close(self):
+            pass
+
+    conn = FakeConn()
+    monkeypatch.setattr(ep.psycopg2, "connect", lambda *args, **kwargs: conn)
+
+    response = authed.get("/api/v1/fire/locality-stats?date=2026-10-12&limit=5")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["scope"] == "2026-10-12"
+    assert data["totals"] == {
+        "events": 1017,
+        "located": 1014,
+        "municipalities": 334,
+        "provinces": 36,
+        "days": 29,
+        "first_date": "2026-09-28",
+        "last_date": "2026-10-26",
+        "max_risk_score": 0.91,
+    }
+    assert data["by_risk_level"] == {
+        "extreme": 0,
+        "high": 400,
+        "moderate": 350,
+        "low": 267,
+    }
+    assert data["provinces"][0]["province"] == "Cáceres"
+    assert data["provinces"][0]["high"] == 40
+    assert data["municipalities"][0]["municipality"] == "Cedillo"
+    assert data["municipalities"][0]["max_risk_score"] == 0.8
+    assert data["daily"] == [
+        {"date": "2026-09-28", "events": 30, "high": 12, "max_risk_score": 0.8}
+    ]
+    # Every aggregate query must receive the selected day; the coordinate is not optional.
+    assert all("2026-10-12" in (params or ()) for _, params in conn.calls)
+
+
 def test_fire_endpoints_require_a_session():
     """Unauthenticated reads must be refused, not served."""
-    for path in ("/api/v1/fire/stats", "/api/v1/fire/dates", "/api/v1/fire/events"):
+    for path in (
+        "/api/v1/fire/stats",
+        "/api/v1/fire/dates",
+        "/api/v1/fire/events",
+        "/api/v1/fire/locality-stats",
+    ):
         assert client.get(path).status_code == 401, path
 
 
@@ -187,12 +294,24 @@ def test_static_dashboard_shell_requires_session():
     Serving the dashboard shell without auth means the only gate is the
     client-side JS redirect, which anyone can bypass by disabling JavaScript.
     """
-    for path in ("/static/index.html", "/static/app.js", "/static/style.css"):
+    for path in (
+        "/static/index.html",
+        "/static/stats.html",
+        "/static/app.js",
+        "/static/stats.js",
+        "/static/style.css",
+    ):
         assert client.get(path).status_code == 401, path
 
 
 def test_static_assets_served_with_session(authed):
-    for path in ("/static/index.html", "/static/app.js", "/static/style.css"):
+    for path in (
+        "/static/index.html",
+        "/static/stats.html",
+        "/static/app.js",
+        "/static/stats.js",
+        "/static/style.css",
+    ):
         assert authed.get(path).status_code == 200, path
 
 

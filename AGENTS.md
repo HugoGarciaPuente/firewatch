@@ -41,8 +41,10 @@ firewatch/
 │   │   │   └── endpoints.py    # API endpoints
 │   │   ├── static/             # Dashboard assets (session-guarded)
 │   │   │   ├── index.html
+│   │   │   ├── stats.html      # Statistics section (session-guarded)
 │   │   │   ├── login.html      # Self-contained: cannot load /static
 │   │   │   ├── app.js
+│   │   │   ├── stats.js
 │   │   │   └── style.css
 │   │   └── tests/              # Test suite (mocked, no live calls)
 │   │       ├── __init__.py
@@ -86,7 +88,7 @@ resolves scope (`--bbox` > `--regions` > `FIREWATCH_REGIONS`); it lives in
 - `docker compose logs -f refresh` - Watch the FIRMS refresh loop
 - `docker compose ps` - Confirm the five services are up (only `api`, `postgres` and `kafka` expose a healthcheck)
 - `pip install -e .` or `pip install -r requirements-dev.txt` - Local dev setup
-- `pytest` - Run tests (122 tests, no live services required)
+- `pytest` - Run tests (127 tests, no live services required)
 - `python -m firewatch.runner ingest` - One-shot FIRMS fetch -> Kafka
 - `python -m firewatch.runner backfill --start-date D --end-date D` - Historical load (one request per day)
 - `python -m firewatch.runner daily --days 3` - Loop that keeps data fresh
@@ -110,6 +112,13 @@ resolves scope (`--bbox` > `--regions` > `FIREWATCH_REGIONS`); it lives in
 - **`locality = '{}'` means "tried, no locality found"** (open sea). It is not
   the same as NULL, which means "not attempted yet". `--recheck` retries the
   former.
+- **`locality.province` is the province, not the autonomous community.**
+  Nominatim puts the community in `address.state` (Extremadura) and the
+  province in `address.province`/`state_district` (Cáceres); `locality.community`
+  keeps the community. Grouping by a `state`-derived value merges Cáceres and
+  Badajoz into "Extremadura", which defeats the whole statistics section. The
+  order is `province` > `state_district` > `county` > `state`: in France
+  `county` is the département (Ariège) and in Portugal the district (Aveiro).
 - **Adding an import can break a container, not just the code.**
   `requirements/` is split per tier, so a new third-party import in
   `services/` means only the tiers that reach it get the package. The image

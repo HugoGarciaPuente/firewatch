@@ -22,12 +22,12 @@ import pytest
 from firewatch.clients.geocode import GeoCodeClient
 
 SPANISH_PAYLOAD = {
-    "display_name": "Alarcon, Cuenca, Castilla-La Mancha, Espana",
+    "display_name": "Alarcón, Cuenca, Castilla-La Mancha, España",
     "address": {
-        "city": "Alarcon",
-        "county": "Cuenca",
+        "city": "Alarcón",
+        "state_district": "Cuenca",
         "state": "Castilla-La Mancha",
-        "country": "Espana",
+        "country": "España",
         "country_code": "es",
     },
 }
@@ -56,10 +56,63 @@ def test_parses_municipality_and_province():
     client = _client(lambda request: httpx.Response(200, json=SPANISH_PAYLOAD))
     loc = client.get_location(39.590, -2.100)
     assert loc is not None
-    assert loc["locality"] == "Alarcon"
-    assert loc["province"] == "Castilla-La Mancha"
-    assert loc["country"] == "Espana"
+    assert loc["locality"] == "Alarcón"
+    assert loc["province"] == "Cuenca"
+    assert loc["community"] == "Castilla-La Mancha"
+    assert loc["country"] == "España"
     assert loc["country_code"] == "es"
+
+
+def test_province_beats_county_comarca():
+    """Alacant: `county` is the comarca (l'Alacantí), not the province."""
+    payload = {
+        "display_name": "Alacant / Alicante, l'Alacantí, Alacant / Alicante, Comunitat Valenciana, España",
+        "address": {
+            "city": "Alacant / Alicante",
+            "county": "l'Alacantí",
+            "province": "Alacant / Alicante",
+            "state": "Comunitat Valenciana",
+        },
+    }
+    client = _client(lambda request: httpx.Response(200, json=payload))
+    loc = client.get_location(38.378, -0.542)
+    assert loc["province"] == "Alacant / Alicante"
+    assert loc["community"] == "Comunitat Valenciana"
+
+
+def test_state_district_is_the_province_when_province_is_absent():
+    """Cedillo: using `state` would label the fire as Extremadura, not Cáceres."""
+    payload = {
+        "display_name": "Cedillo, Cáceres, Extremadura, 10513, España",
+        "address": {
+            "village": "Cedillo",
+            "state_district": "Cáceres",
+            "state": "Extremadura",
+        },
+    }
+    client = _client(lambda request: httpx.Response(200, json=payload))
+    loc = client.get_location(39.613, -7.468)
+    assert loc["province"] == "Cáceres"
+    assert loc["community"] == "Extremadura"
+
+
+def test_uses_county_over_state_for_french_departments():
+    """France: `county` is the département (Ariège), `state` the region (Occitanie)."""
+    payload = {
+        "display_name": "Rabat-les-Trois-Seigneurs, Foix, Ariège, Occitanie, France",
+        "address": {
+            "village": "Rabat-les-Trois-Seigneurs",
+            "municipality": "Foix",
+            "county": "Ariège",
+            "state": "Occitanie",
+            "country": "France",
+            "country_code": "fr",
+        },
+    }
+    client = _client(lambda request: httpx.Response(200, json=payload))
+    loc = client.get_location(42.85, 1.55)
+    assert loc["province"] == "Ariège"
+    assert loc["community"] == "Occitanie"
 
 
 def test_falls_back_through_the_settlement_vocabulary():

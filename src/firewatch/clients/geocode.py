@@ -86,7 +86,8 @@ class GeoCodeClient:
         dict o None
             {
                 "locality": str,     # municipio / localidad, "" si es desconocido
-                "province": str,     # provincia / comunidad, "" si es desconocido
+                "province": str,     # provincia / departamento / distrito
+                "community": str,    # comunidad autónoma / región
                 "country": str,
                 "country_code": str, # ej. "es", "fr", "pt"
                 "display_name": str,
@@ -169,9 +170,22 @@ class GeoCodeClient:
             # Nominatim responde {"error": "Unable to geocode"} para puntos sin localidad mapeada
             return None
 
+        # La provincia NO es `state` en España: ahí `state` es la comunidad
+        # autónoma (Extremadura), y la provincia (Cáceres) llega en
+        # `state_district` o `province`. En Francia `county` es el departamento
+        # (Ariège) y `state` la región (Occitanie); en Portugal `county` es el
+        # distrito (Aveiro). Por eso el orden es provincia > state_district >
+        # county > state, y `community` conserva siempre el nivel superior.
         return {
             "locality": locality,
-            "province": str(address.get("state") or address.get("county") or ""),
+            "province": str(
+                address.get("province")
+                or address.get("state_district")
+                or address.get("county")
+                or address.get("state")
+                or ""
+            ),
+            "community": str(address.get("state") or ""),
             "country": str(address.get("country") or ""),
             "country_code": str(address.get("country_code") or ""),
             "display_name": display_name,

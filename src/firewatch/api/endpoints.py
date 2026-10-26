@@ -215,6 +215,212 @@ def fire_stats(date: Optional[str] = Query(None, description="Día exacto AAAA-M
         conn.close()
 
 
+@router.get("/locality-stats")
+def locality_stats(
+    date: Optional[str] = Query(None, description="Día exacto AAAA-MM-DD"),
+    country: Optional[str] = Query(
+        None, description="País o código ISO (es, pt, fr) para restringir la agregación"
+    ),
+    limit: int = Query(15, ge=1, le=100),
+) -> dict:
+    """
+    Agrega los focos por provincia y municipio para la sección de estadísticas.
+
+    ``locality`` es el JSONB que escribe el geocodificador inverso. ``province`` es
+    la unidad administrativa intermedia (provincia española, departamento francés,
+    distrito portugués) y ``community`` el nivel superior (comunidad autónoma o
+    región). Las filas sin localidad resuelta (mar abierto, fallo de Nominatim) no
+    entran en los rankings, pero sí en los totales.
+    """
+    try:
+        conn = psycopg2.connect(settings.POSTGRES_DSN)
+    except psycopg2.OperationalError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database unavailable",
+        ) from exc
+
+    try:
+        with conn.cursor() as cur:
+            conditions: List[str] = []
+            params: List[Any] = []
+            if date:
+                conditions.append("acq_date = %s")
+                params.append(date)
+            if country:
+                conditions.append(
+                    "(LOWER(locality->>'country') = LOWER(%s) "
+                    "OR LOWER(locality->>'country_code') = LOWER(%s))"
+                )
+                params.extend([country, country])
+
+            where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+            located_conditions = [
+                "locality->>'locality' IS NOT NULL",
+                "locality->>'locality' <> ''",
+            ]
+            located_conditions.extend(conditions)
+            located_where = "WHERE " + " AND ".join(located_conditions)
+
+            cur.execute(
+                f"""
+                SELECT COUNT(*) AS total,
+                       COUNT(*) FILTER (
+                           WHERE locality->>'locality' IS NOT NULL
+                             AND locality->>'locality' <> ''
+                       ) AS located,
+                       COUNT(DISTINCT locality->>'locality') FILTER (
+                           WHERE locality->>'locality' IS NOT NULL
+                             AND locality->>'locality' <> ''
+                       ) AS municipalities,
+                       COUNT(DISTINCT locality->>'province') FILTER (
+                           WHERE locality->>'province' IS NOT NULL
+                             AND locality->>'province' <> ''
+                       ) AS provinces,
+                       COUNT(DISTINCT acq_date) AS days,
+                       MIN(acq_date) AS first_date,
+                       MAX(acq_date) AS last_date,
+                       COALESCE(MAX(risk_score), 0) AS max_risk_score
+                FROM fire_events
+                {where};
+                """,
+                tuple(params),
+            )
+            (
+                total,
+                located,
+                municipalities,
+                provinces,
+                days,
+                first_date,
+                last_date,
+                max_score,
+            ) = cur.fetchone()
+
+            cur.execute(
+                f"""
+                SELECT COALESCE(risk_level, 'unknown') AS level, COUNT(*)
+                FROM fire_events
+                {where}
+                GROUP BY risk_level;
+                """,
+                tuple(params),
+            )
+            by_level = {"extreme": 0, "high": 0, "moderate": 0, "low": 0}
+            for level, count in cur.fetchall():
+                by_level[str(level).lower()] = count
+
+            cur.execute(
+                f"""
+                SELECT COALESCE(locality->>'province', 'Sin provincia') AS province,
+                       COALESCE(locality->>'community', '') AS community,
+                       COALESCE(locality->>'country', '') AS country,
+                       COUNT(*) AS events,
+                       COUNT(DISTINCT locality->>'locality') AS municipalities,
+                       COUNT(*) FILTER (
+                           WHERE LOWER(risk_level) IN ('high', 'extreme')
+                       ) AS high,
+                       COALESCE(MAX(risk_score), 0) AS max_risk_score
+                FROM fire_events
+                {located_where}
+                GROUP BY 1, 2, 3
+                ORDER BY events DESC, province
+                LIMIT %s;
+                """,
+                tuple(params) + (limit,),
+            )
+            province_rows = cur.fetchall()
+
+            cur.execute(
+                f"""
+                SELECT locality->>'locality' AS municipality,
+                       COALESCE(locality->>'province', '') AS province,
+                       COALESCE(locality->>'community', '') AS community,
+                       COALESCE(locality->>'country', '') AS country,
+                       COUNT(*) AS events,
+                       COUNT(*) FILTER (
+                           WHERE LOWER(risk_level) IN ('high', 'extreme')
+                       ) AS high,
+                       COALESCE(MAX(risk_score), 0) AS max_risk_score
+                FROM fire_events
+                {located_where}
+                GROUP BY 1, 2, 3, 4
+                ORDER BY events DESC, municipality
+                LIMIT %s;
+                """,
+                tuple(params) + (limit,),
+            )
+            municipality_rows = cur.fetchall()
+
+            cur.execute(
+                f"""
+                SELECT acq_date,
+                       COUNT(*) AS events,
+                       COUNT(*) FILTER (
+                           WHERE LOWER(risk_level) IN ('high', 'extreme')
+                       ) AS high,
+                       COALESCE(MAX(risk_score), 0) AS max_risk_score
+                FROM fire_events
+                {where}
+                GROUP BY acq_date
+                ORDER BY acq_date;
+                """,
+                tuple(params),
+            )
+            daily_rows = cur.fetchall()
+
+        return {
+            "scope": date or "all",
+            "country": country,
+            "totals": {
+                "events": total,
+                "located": located,
+                "municipalities": municipalities,
+                "provinces": provinces,
+                "days": days,
+                "first_date": first_date.isoformat() if first_date else None,
+                "last_date": last_date.isoformat() if last_date else None,
+                "max_risk_score": round(float(max_score or 0), 4),
+            },
+            "by_risk_level": by_level,
+            "provinces": [
+                {
+                    "province": row[0],
+                    "community": row[1],
+                    "country": row[2],
+                    "events": row[3],
+                    "municipalities": row[4],
+                    "high": row[5],
+                    "max_risk_score": round(float(row[6] or 0), 4),
+                }
+                for row in province_rows
+            ],
+            "municipalities": [
+                {
+                    "municipality": row[0],
+                    "province": row[1],
+                    "community": row[2],
+                    "country": row[3],
+                    "events": row[4],
+                    "high": row[5],
+                    "max_risk_score": round(float(row[6] or 0), 4),
+                }
+                for row in municipality_rows
+            ],
+            "daily": [
+                {
+                    "date": row[0].isoformat(),
+                    "events": row[1],
+                    "high": row[2],
+                    "max_risk_score": round(float(row[3] or 0), 4),
+                }
+                for row in daily_rows
+            ],
+        }
+    finally:
+        conn.close()
+
+
 @router.post("/ingest", status_code=status.HTTP_202_ACCEPTED)
 def trigger_ingest(
     background: BackgroundTasks,

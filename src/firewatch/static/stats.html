@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🔥 FireWatch — Estadísticas</title>
+
+  <!-- Google Fonts: Inter + JetBrains Mono (mismas que el dashboard) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/static/style.css?v=12">
+</head>
+<body>
+  <div class="app-container">
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-icon">🔥</span>
+        <div>
+          <h1 class="brand-title">FireWatch <span class="badge badge-phase">Estadísticas</span></h1>
+          <p class="brand-subtitle">Agregación histórica por provincia y municipio</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <a href="/dashboard" class="btn btn-secondary" title="Volver al mapa">
+          <span class="icon">🗺️</span> Mapa
+        </a>
+        <button id="btn-refresh-stats" class="btn btn-secondary" title="Actualizar datos">
+          <span class="icon">🔄</span> Actualizar
+        </button>
+        <button id="btn-logout" class="btn btn-secondary" title="Cerrar sesión">
+          <span class="icon">⎋</span> Salir
+        </button>
+      </div>
+    </header>
+
+    <main class="stats-main">
+      <!-- KPIs -->
+      <section class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-label">Focos</div>
+          <div class="kpi-value" id="stat-total">-</div>
+          <div class="kpi-hint" id="stat-range">Cargando…</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Municipios</div>
+          <div class="kpi-value" id="stat-municipalities">-</div>
+          <div class="kpi-hint">con al menos un foco</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Provincias</div>
+          <div class="kpi-value" id="stat-provinces">-</div>
+          <div class="kpi-hint">provincia / departamento / distrito</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-label">Días con datos</div>
+          <div class="kpi-value" id="stat-days">-</div>
+          <div class="kpi-hint">días de adquisición</div>
+        </div>
+        <div class="kpi-card kpi-high">
+          <div class="kpi-label">Riesgo alto + extremo</div>
+          <div class="kpi-value" id="stat-high">-</div>
+          <div class="kpi-hint">índice &ge; 0.50</div>
+        </div>
+      </section>
+
+      <!-- Selector de periodo -->
+      <section class="stats-toolbar">
+        <label for="stats-date">Periodo</label>
+        <select id="stats-date" class="form-select">
+          <option value="">Todo el histórico</option>
+        </select>
+        <span class="stats-toolbar-hint" id="stats-scope">Cargando…</span>
+      </section>
+
+      <!-- Paneles -->
+      <section class="stats-grid">
+        <div class="stats-card">
+          <h2 class="stats-card-title">Distribución de riesgo</h2>
+          <div id="risk-stack" class="risk-stack" aria-label="Distribución por nivel de riesgo"></div>
+          <div id="risk-legend" class="risk-legend"></div>
+        </div>
+
+        <div class="stats-card">
+          <h2 class="stats-card-title">Evolución diaria</h2>
+          <div class="chart-wrap">
+            <svg id="daily-chart" viewBox="0 0 800 240" role="img"
+                 aria-label="Número de focos por día de adquisición"></svg>
+          </div>
+        </div>
+
+        <div class="stats-card">
+          <h2 class="stats-card-title">Provincias más afectadas</h2>
+          <div id="provinces-list" class="bar-list">
+            <div class="loading-placeholder">Cargando…</div>
+          </div>
+        </div>
+
+        <div class="stats-card">
+          <h2 class="stats-card-title">Municipios más afectados</h2>
+          <div class="table-wrap">
+            <table class="stats-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Municipio</th>
+                  <th>Provincia</th>
+                  <th class="num">Focos</th>
+                  <th class="num">Alto+</th>
+                  <th class="num">Máx.</th>
+                </tr>
+              </thead>
+              <tbody id="municipalities-body">
+                <tr><td colspan="6" class="loading-placeholder">Cargando…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <p class="stats-note">
+        Agregación sobre la localidad reverse-geocodificada con Nominatim. «Provincia» es la unidad
+        administrativa intermedia (provincia española, departamento francés, distrito portugués);
+        «Alto+» suma riesgo alto y extremo. Los focos sin localidad resuelta se cuentan en el total
+        pero no entran en los rankings.
+      </p>
+    </main>
+  </div>
+
+  <script src="/static/stats.js?v=1"></script>
+</body>
+</html>
