@@ -88,7 +88,7 @@ resolves scope (`--bbox` > `--regions` > `FIREWATCH_REGIONS`); it lives in
 - `docker compose logs -f refresh` - Watch the FIRMS refresh loop
 - `docker compose ps` - Confirm the five services are up (only `api`, `postgres` and `kafka` expose a healthcheck)
 - `pip install -e .` or `pip install -r requirements-dev.txt` - Local dev setup
-- `pytest` - Run tests (127 tests, no live services required)
+- `pytest` - Run tests (132 tests, no live services required)
 - `python -m firewatch.runner ingest` - One-shot FIRMS fetch -> Kafka
 - `python -m firewatch.runner backfill --start-date D --end-date D` - Historical load (one request per day)
 - `python -m firewatch.runner daily --days 3` - Loop that keeps data fresh
@@ -119,6 +119,15 @@ resolves scope (`--bbox` > `--regions` > `FIREWATCH_REGIONS`); it lives in
   Badajoz into "Extremadura", which defeats the whole statistics section. The
   order is `province` > `state_district` > `county` > `state`: in France
   `county` is the département (Ariège) and in Portugal the district (Aveiro).
+- **Statistics presets are anchored to the last date with data, not to today.**
+  FIRMS NRT lags and the current day can be empty, so "último día/semana/mes/
+  año" computed from `date.today()` would open empty windows. `/stats` reads
+  `last_date` from `/api/v1/fire/stats`; the API range is inclusive on both ends.
+- **The province selector filters, it does not define the dataset scope.**
+  `/api/v1/fire/provinces` returns every `locality.province` (Spanish provinces,
+  Portuguese districts, French departments); the browser appends the country to
+  foreign options. "Todas las provincias" means the whole dataset, including
+  those spillover points; do not silently drop them from the selector.
 - **Adding an import can break a container, not just the code.**
   `requirements/` is split per tier, so a new third-party import in
   `services/` means only the tiers that reach it get the package. The image

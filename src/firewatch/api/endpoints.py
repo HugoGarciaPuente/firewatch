@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import date
 from typing import Any, Dict, List, Optional
 
 import psycopg2
@@ -32,10 +33,23 @@ def _parse_bbox(bbox: str) -> tuple[float, float, float, float]:
         south, west, north, east = (float(p) for p in bbox.split(","))
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="bbox must be 'south,west,north,east'",
         ) from exc
     return south, west, north, east
+
+
+def _parse_iso_date(value: Optional[str], field: str) -> Optional[str]:
+    """Valida AAAA-MM-DD antes de mandarlo a Postgres, que devolvería un 500."""
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value).isoformat()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"{field} must be a date in YYYY-MM-DD format",
+        ) from exc
 
 
 @router.get("/events", response_model=List[dict])
@@ -218,13 +232,23 @@ def fire_stats(date: Optional[str] = Query(None, description="Día exacto AAAA-M
 @router.get("/locality-stats")
 def locality_stats(
     date: Optional[str] = Query(None, description="Día exacto AAAA-MM-DD"),
-    country: Optional[str] = Query(
-        None, description="País o código ISO (es, pt, fr) para restringir la agregación"
+    start_date: Optional[str] = Query(
+        None, description="Primer día del intervalo (AAAA-MM-DD), inclusive"
+    ),
+    end_date: Optional[str] = Query(
+        None, description="Último día del intervalo (AAAA-MM-DD), inclusive"
+    ),
+    province: Optional[str] = Query(
+        None, description="Provincia, departamento o distrito exacto"
     ),
     limit: int = Query(15, ge=1, le=100),
 ) -> dict:
     """
     Agrega los focos por provincia y municipio para la sección de estadísticas.
+
+    Acepta un día concreto (``date``), un intervalo inclusivo
+    (``start_date``/``end_date``) o ninguno de los dos (todo el histórico). El
+    filtro ``province`` es exacto y se aplica después de la geocodificación.
 
     ``locality`` es el JSONB que escribe el geocodificador inverso. ``province`` es
     la unidad administrativa intermedia (provincia española, departamento francés,
@@ -232,6 +256,21 @@ def locality_stats(
     región). Las filas sin localidad resuelta (mar abierto, fallo de Nominatim) no
     entran en los rankings, pero sí en los totales.
     """
+    date = _parse_iso_date(date, "date")
+    start_date = _parse_iso_date(start_date, "start_date")
+    end_date = _parse_iso_date(end_date, "end_date")
+
+    if date and (start_date or end_date):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Use either date or start_date/end_date, not both",
+        )
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="start_date must be earlier than or equal to end_date",
+        )
+
     try:
         conn = psycopg2.connect(settings.POSTGRES_DSN)
     except psycopg2.OperationalError as exc:
@@ -247,12 +286,16 @@ def locality_stats(
             if date:
                 conditions.append("acq_date = %s")
                 params.append(date)
-            if country:
-                conditions.append(
-                    "(LOWER(locality->>'country') = LOWER(%s) "
-                    "OR LOWER(locality->>'country_code') = LOWER(%s))"
-                )
-                params.extend([country, country])
+            else:
+                if start_date:
+                    conditions.append("acq_date >= %s")
+                    params.append(start_date)
+                if end_date:
+                    conditions.append("acq_date <= %s")
+                    params.append(end_date)
+            if province:
+                conditions.append("locality->>'province' = %s")
+                params.append(province)
 
             where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
             located_conditions = [
@@ -369,9 +412,21 @@ def locality_stats(
             )
             daily_rows = cur.fetchall()
 
+        if date:
+            scope = date
+        elif start_date or end_date:
+            scope = f"{start_date or ''}..{end_date or ''}"
+        else:
+            scope = "all"
+
         return {
-            "scope": date or "all",
-            "country": country,
+            "scope": scope,
+            "filters": {
+                "date": date,
+                "start_date": start_date,
+                "end_date": end_date,
+                "province": province,
+            },
             "totals": {
                 "events": total,
                 "located": located,
@@ -419,6 +474,54 @@ def locality_stats(
         }
     finally:
         conn.close()
+
+
+@router.get("/provinces", response_model=List[dict])
+def list_provinces() -> List[dict]:
+    """
+    Lista las provincias/departamentos/distritos con al menos un foco localizado.
+
+    La sección de estadísticas usa esta lista para el selector. Se devuelven todos
+    los niveles administrativos intermedios (también los de Portugal y Francia que
+    caen dentro de los bboxes), porque el filtro ``province`` es exacto: el
+    navegador añade el país al texto de las opciones extranjeras.
+    """
+    try:
+        conn = psycopg2.connect(settings.POSTGRES_DSN)
+    except psycopg2.OperationalError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database unavailable",
+        ) from exc
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT locality->>'province' AS province,
+                       COALESCE(locality->>'community', '') AS community,
+                       COALESCE(locality->>'country', '') AS country,
+                       COUNT(*) AS events
+                FROM fire_events
+                WHERE locality->>'province' IS NOT NULL
+                  AND locality->>'province' <> ''
+                GROUP BY 1, 2, 3
+                ORDER BY province;
+                """
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    return [
+        {
+            "province": row[0],
+            "community": row[1],
+            "country": row[2],
+            "events": row[3],
+        }
+        for row in rows
+    ]
 
 
 @router.post("/ingest", status_code=status.HTTP_202_ACCEPTED)

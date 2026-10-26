@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="/static/style.css?v=13">
+  <link rel="stylesheet" href="/static/style.css?v=14">
 </head>
 <body>
   <div class="app-container">
@@ -66,20 +66,43 @@
         </div>
       </section>
 
-      <!-- Selector de periodo -->
+      <!-- Filtros -->
       <section class="stats-toolbar">
-        <label for="stats-country">País</label>
-        <select id="stats-country" class="form-select">
-          <option value="es" selected>España</option>
-          <option value="pt">Portugal</option>
-          <option value="fr">Francia</option>
-          <option value="">Todos</option>
-        </select>
+        <div class="filter-field">
+          <label for="stats-province">Provincia</label>
+          <select id="stats-province" class="form-select">
+            <option value="">Todas las provincias</option>
+          </select>
+        </div>
 
-        <label for="stats-date">Periodo</label>
-        <select id="stats-date" class="form-select">
-          <option value="">Todo el histórico</option>
-        </select>
+        <div class="filter-field">
+          <label for="stats-period">Periodo</label>
+          <select id="stats-period" class="form-select">
+            <option value="all">Todo el histórico</option>
+            <option value="last-day">Último día</option>
+            <option value="last-week">Última semana</option>
+            <option value="last-month">Último mes</option>
+            <option value="last-year">Último año</option>
+            <option value="single">Fecha concreta</option>
+            <option value="custom">Rango personalizado</option>
+          </select>
+        </div>
+
+        <div class="filter-field" id="stats-single-field" hidden>
+          <label for="stats-single-date">Fecha</label>
+          <input type="date" id="stats-single-date" class="form-input">
+        </div>
+
+        <div class="stats-range" id="stats-range-field" hidden>
+          <div class="filter-field">
+            <label for="stats-start">Desde</label>
+            <input type="date" id="stats-start" class="form-input">
+          </div>
+          <div class="filter-field">
+            <label for="stats-end">Hasta</label>
+            <input type="date" id="stats-end" class="form-input">
+          </div>
+        </div>
 
         <span class="stats-toolbar-hint" id="stats-scope">Cargando…</span>
       </section>
@@ -133,11 +156,12 @@
         Agregación sobre la localidad reverse-geocodificada con Nominatim. «Provincia» es la unidad
         administrativa intermedia (provincia española, departamento francés, distrito portugués);
         «Alto+» suma riesgo alto y extremo. Los focos sin localidad resuelta se cuentan en el total
-        pero no entran en los rankings.
+        pero no entran en los rankings. Los presets de periodo se anclan al último día con datos,
+        no a la fecha de hoy.
       </p>
     </main>
   </div>
 
-  <script src="/static/stats.js?v=2"></script>
+  <script src="/static/stats.js?v=3"></script>
 </body>
 </html>

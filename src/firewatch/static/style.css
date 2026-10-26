@@ -846,8 +846,15 @@ body {
 
 .stats-toolbar {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
+  flex-wrap: wrap;
   gap: 12px;
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .stats-toolbar label {
@@ -858,18 +865,39 @@ body {
   font-weight: 600;
 }
 
-.stats-toolbar .form-select {
+.stats-toolbar .form-select,
+.stats-toolbar .form-input {
   width: auto;
   min-width: 160px;
 }
 
-#stats-date {
-  min-width: 260px;
+#stats-province {
+  min-width: 200px;
+}
+
+#stats-period {
+  min-width: 190px;
+}
+
+.stats-range {
+  display: flex;
+  gap: 10px;
+}
+
+.stats-range .form-input {
+  min-width: 150px;
+}
+
+.filter-field[hidden],
+.stats-range[hidden] {
+  display: none !important;
 }
 
 .stats-toolbar-hint {
   font-size: 12px;
   color: var(--text-dim);
+  margin-left: auto;
+  padding-bottom: 8px;
 }
 
 .stats-grid {
@@ -1064,6 +1092,11 @@ body {
 
 #daily-chart .point {
   fill: var(--accent-primary);
+}
+
+#daily-chart .bar {
+  fill: var(--accent-primary);
+  opacity: 0.85;
 }
 
 .stats-note {

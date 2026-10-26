@@ -13,6 +13,13 @@ const RISK_META = {
   low: { label: 'Bajo', color: '#10b981' },
 };
 
+const PERIOD_DAYS = {
+  'last-day': 1,
+  'last-week': 7,
+  'last-month': 30,
+  'last-year': 365,
+};
+
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
     '&': '&amp;',
@@ -35,11 +42,24 @@ async function fetchJson(url) {
   return response.json();
 }
 
+function shiftDate(iso, days) {
+  const [year, month, day] = iso.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day + days));
+  return date.toISOString().slice(0, 10);
+}
+
 class StatsPage {
   constructor() {
-    this.countrySelect = document.getElementById('stats-country');
-    this.dateSelect = document.getElementById('stats-date');
+    this.provinceSelect = document.getElementById('stats-province');
+    this.periodSelect = document.getElementById('stats-period');
+    this.singleDate = document.getElementById('stats-single-date');
+    this.startDate = document.getElementById('stats-start');
+    this.endDate = document.getElementById('stats-end');
+    this.singleField = document.getElementById('stats-single-field');
+    this.rangeField = document.getElementById('stats-range-field');
     this.scope = document.getElementById('stats-scope');
+    this.latestDate = null;
+    this.firstDate = null;
   }
 
   async init() {
@@ -48,51 +68,166 @@ class StatsPage {
       await fetch('/auth/logout', { method: 'POST' });
       location.replace('/login');
     });
-    this.countrySelect.addEventListener('change', () => this.loadStats());
-    this.dateSelect.addEventListener('change', () => this.loadStats());
 
-    await this.loadDates();
-    await this.loadStats();
+    this.provinceSelect.addEventListener('change', () => this.loadStats());
+    this.periodSelect.addEventListener('change', () => this.onPeriodChange());
+    this.singleDate.addEventListener('change', () => this.loadStats());
+    this.startDate.addEventListener('change', () => this.loadStats());
+    this.endDate.addEventListener('change', () => this.loadStats());
+
+    await Promise.all([this.loadProvinces(), this.loadLatest()]);
+    this.onPeriodChange();
   }
 
-  async loadDates() {
+  async loadProvinces() {
     try {
-      const dates = await fetchJson('/api/v1/fire/dates');
-      for (const day of dates) {
+      const provinces = await fetchJson('/api/v1/fire/provinces');
+      provinces.sort((a, b) => a.province.localeCompare(b.province, 'es'));
+      for (const item of provinces) {
         const option = document.createElement('option');
-        option.value = day.date;
-        option.textContent = `${this.formatDate(day.date)} · ${this.number(day.total)} focos`;
-        this.dateSelect.appendChild(option);
+        option.value = item.province;
+        const foreign = item.country && item.country !== 'España';
+        option.textContent = foreign ? `${item.province} (${item.country})` : item.province;
+        this.provinceSelect.appendChild(option);
       }
     } catch (error) {
-      // El selector vacío sigue funcionando como "todo el histórico".
-      console.warn('No se pudieron cargar las fechas:', error);
+      console.warn('No se pudieron cargar las provincias:', error);
     }
   }
 
-  async loadStats() {
-    const date = this.dateSelect.value;
-    const country = this.countrySelect.value;
-    this.scope.textContent = 'Cargando…';
+  async loadLatest() {
     try {
-      const query = new URLSearchParams({ limit: '15' });
-      if (date) {
-        query.set('date', date);
+      const stats = await fetchJson('/api/v1/fire/stats');
+      this.latestDate = stats.last_date;
+      this.firstDate = stats.first_date;
+    } catch (error) {
+      console.warn('No se pudo obtener el último día con datos:', error);
+    }
+
+    if (!this.latestDate) {
+      return;
+    }
+
+    this.singleDate.value = this.latestDate;
+    this.endDate.value = this.latestDate;
+    this.startDate.value = shiftDate(this.latestDate, -6);
+
+    for (const input of [this.singleDate, this.startDate, this.endDate]) {
+      if (this.firstDate) input.min = this.firstDate;
+      input.max = this.latestDate;
+    }
+  }
+
+  onPeriodChange(load = true) {
+    const period = this.periodSelect.value;
+    const isSingle = period === 'single';
+    const isCustom = period === 'custom';
+
+    this.singleField.hidden = !isSingle;
+    this.rangeField.hidden = !isCustom;
+
+    if (isSingle && !this.singleDate.value && this.latestDate) {
+      this.singleDate.value = this.latestDate;
+    }
+    if (isCustom && !this.startDate.value && this.latestDate) {
+      this.startDate.value = shiftDate(this.latestDate, -6);
+      this.endDate.value = this.latestDate;
+    }
+
+    if (load) {
+      this.loadStats();
+    }
+  }
+
+  currentRange() {
+    const period = this.periodSelect.value;
+
+    if (period === 'all') {
+      return {};
+    }
+
+    if (period === 'single') {
+      return this.singleDate.value ? { date: this.singleDate.value } : null;
+    }
+
+    if (period === 'custom') {
+      let start = this.startDate.value;
+      let end = this.endDate.value;
+
+      if (!start && !end) {
+        return null;
       }
-      if (country) {
-        query.set('country', country);
+      if (start && end && start > end) {
+        [start, end] = [end, start];
+        this.startDate.value = start;
+        this.endDate.value = end;
       }
+
+      const range = {};
+      if (start) range.start_date = start;
+      if (end) range.end_date = end;
+      return range;
+    }
+
+    if (!this.latestDate) {
+      return null;
+    }
+
+    const days = PERIOD_DAYS[period];
+    if (!days) {
+      return {};
+    }
+
+    return {
+      start_date: shiftDate(this.latestDate, -(days - 1)),
+      end_date: this.latestDate,
+    };
+  }
+
+  async loadStats() {
+    const range = this.currentRange();
+
+    if (!range) {
+      this.scope.textContent = 'Selecciona una fecha';
+      return;
+    }
+
+    const query = new URLSearchParams({ limit: '15', ...range });
+    if (this.provinceSelect.value) {
+      query.set('province', this.provinceSelect.value);
+    }
+
+    this.scope.textContent = 'Cargando…';
+
+    try {
       const data = await fetchJson(`/api/v1/fire/locality-stats?${query.toString()}`);
       this.render(data);
-      const period = date
-        ? `Día ${this.formatDate(date)}`
-        : `Histórico completo (${this.number(data.totals.days)} días)`;
-      const countryName = this.countrySelect.selectedOptions[0].textContent;
-      this.scope.textContent = country ? `${period} · ${countryName}` : `${period} · Todos los países`;
+      this.scope.textContent = this.describeScope(range, data);
     } catch (error) {
       this.scope.textContent = 'No se pudieron cargar las estadísticas';
       console.error(error);
     }
+  }
+
+  describeScope(range, data) {
+    let period;
+
+    if (this.periodSelect.value === 'single') {
+      period = `Día ${this.formatDate(range.date)}`;
+    } else if (range.start_date || range.end_date) {
+      const start = range.start_date ? this.formatDate(range.start_date) : '…';
+      const end = range.end_date ? this.formatDate(range.end_date) : '…';
+      period = start === end ? `Día ${start}` : `${start} → ${end}`;
+    } else {
+      period = 'Todo el histórico';
+    }
+
+    const province = this.provinceSelect.value
+      ? this.provinceSelect.selectedOptions[0].textContent
+      : 'Todas las provincias';
+    const empty = data.totals.events === 0 ? ' · sin datos' : '';
+
+    return `${period} · ${province}${empty}`;
   }
 
   render(data) {
@@ -246,18 +381,34 @@ class StatsPage {
     const line = points.map(([px, py]) => `${px.toFixed(1)},${py.toFixed(1)}`).join(' ');
     const baseline = pad.top + innerHeight;
 
-    add('polygon', {
-      class: 'area',
-      points: `${pad.left},${baseline} ${line} ${width - pad.right},${baseline}`,
-    });
-    add('polyline', { class: 'line', points: line });
-
-    points.forEach(([px, py], index) => {
-      const point = add('circle', { class: 'point', cx: px, cy: py, r: 3 });
+    if (daily.length === 1) {
+      // Un solo día: una barra se lee mejor que un punto suelto.
+      const barWidth = Math.min(120, innerWidth / 3);
+      const bar = add('rect', {
+        class: 'bar',
+        x: x(0) - barWidth / 2,
+        y: y(daily[0].events),
+        width: barWidth,
+        height: Math.max(baseline - y(daily[0].events), 1),
+        rx: 4,
+      });
       const title = document.createElementNS(ns, 'title');
-      title.textContent = `${this.formatDate(daily[index].date)}: ${daily[index].events} focos`;
-      point.appendChild(title);
-    });
+      title.textContent = `${this.formatDate(daily[0].date)}: ${daily[0].events} focos`;
+      bar.appendChild(title);
+    } else {
+      add('polygon', {
+        class: 'area',
+        points: `${pad.left},${baseline} ${line} ${width - pad.right},${baseline}`,
+      });
+      add('polyline', { class: 'line', points: line });
+
+      points.forEach(([px, py], index) => {
+        const point = add('circle', { class: 'point', cx: px, cy: py, r: 3 });
+        const title = document.createElementNS(ns, 'title');
+        title.textContent = `${this.formatDate(daily[index].date)}: ${daily[index].events} focos`;
+        point.appendChild(title);
+      });
+    }
 
     // Etiquetas del eje X: primera, central y última fecha.
     const labels =

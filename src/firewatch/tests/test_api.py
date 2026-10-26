@@ -60,12 +60,14 @@ def test_openapi_document_generated():
     # /stats accepts a day so the top KPIs follow the selected day
     stats_params = [p["name"] for p in paths["/api/v1/fire/stats"]["get"]["parameters"]]
     assert "date" in stats_params
-    # Statistics section: aggregated by province/municipality, optional day/country
+    # Statistics section: aggregated by province/municipality, optional day/range/province
     assert "/api/v1/fire/locality-stats" in paths
     locality_params = [
         p["name"] for p in paths["/api/v1/fire/locality-stats"]["get"]["parameters"]
     ]
-    assert {"date", "country", "limit"} <= set(locality_params)
+    assert {"date", "start_date", "end_date", "province", "limit"} <= set(locality_params)
+    # The province selector needs the full list, not only the top N ranking
+    assert "/api/v1/fire/provinces" in paths
 
 
 def test_dashboard_endpoint_requires_session(authed):
@@ -98,8 +100,35 @@ def test_login_page_is_public():
 # ---------------------------------------------------------------------------
 
 
-def test_locality_stats_shapes_the_aggregations(authed, monkeypatch):
-    """The statistics endpoint must expose totals, levels, provinces, municipalities and daily."""
+@pytest.mark.parametrize(
+    "query, expected_filters, expected_scope",
+    [
+        (
+            "date=2026-10-12",
+            {
+                "date": "2026-10-12",
+                "start_date": None,
+                "end_date": None,
+                "province": None,
+            },
+            "2026-10-12",
+        ),
+        (
+            "start_date=2026-10-01&end_date=2026-10-12&province=Cáceres",
+            {
+                "date": None,
+                "start_date": "2026-10-01",
+                "end_date": "2026-10-12",
+                "province": "Cáceres",
+            },
+            "2026-10-01..2026-10-12",
+        ),
+    ],
+)
+def test_locality_stats_shapes_the_aggregations(
+    authed, monkeypatch, query, expected_filters, expected_scope
+):
+    """The endpoint exposes totals, levels, rankings and daily, for a day or a range."""
     from datetime import date
 
     from firewatch.api import endpoints as ep
@@ -153,11 +182,12 @@ def test_locality_stats_shapes_the_aggregations(authed, monkeypatch):
     conn = FakeConn()
     monkeypatch.setattr(ep.psycopg2, "connect", lambda *args, **kwargs: conn)
 
-    response = authed.get("/api/v1/fire/locality-stats?date=2026-10-12&limit=5")
+    response = authed.get(f"/api/v1/fire/locality-stats?{query}&limit=5")
 
     assert response.status_code == 200
     data = response.json()
-    assert data["scope"] == "2026-10-12"
+    assert data["scope"] == expected_scope
+    assert data["filters"] == expected_filters
     assert data["totals"] == {
         "events": 1017,
         "located": 1014,
@@ -181,8 +211,80 @@ def test_locality_stats_shapes_the_aggregations(authed, monkeypatch):
     assert data["daily"] == [
         {"date": "2026-09-28", "events": 30, "high": 12, "max_risk_score": 0.8}
     ]
-    # Every aggregate query must receive the selected day; the coordinate is not optional.
-    assert all("2026-10-12" in (params or ()) for _, params in conn.calls)
+    # Every aggregate query must receive the whole range and the province filter.
+    for _, params in conn.calls:
+        params = params or ()
+        if expected_filters["date"]:
+            assert expected_filters["date"] in params
+        else:
+            assert expected_filters["start_date"] in params
+            assert expected_filters["end_date"] in params
+        if expected_filters["province"]:
+            assert expected_filters["province"] in params
+
+
+def test_list_provinces_returns_selector_options(authed, monkeypatch):
+    """The selector needs every province, not only the top N of the ranking."""
+    from firewatch.api import endpoints as ep
+
+    class FakeCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params=None):
+            assert "GROUP BY 1, 2, 3" in sql
+            self._rows = [
+                ("Ariège", "Occitanie", "France", 40),
+                ("Badajoz", "Extremadura", "España", 148),
+            ]
+
+        def fetchall(self):
+            return self._rows
+
+    class FakeConn:
+        def cursor(self, *args, **kwargs):
+            return FakeCursor()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(ep.psycopg2, "connect", lambda *args, **kwargs: FakeConn())
+
+    response = authed.get("/api/v1/fire/provinces")
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "province": "Ariège",
+            "community": "Occitanie",
+            "country": "France",
+            "events": 40,
+        },
+        {
+            "province": "Badajoz",
+            "community": "Extremadura",
+            "country": "España",
+            "events": 148,
+        },
+    ]
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "date=2026-10-12&start_date=2026-10-01",
+        "start_date=2026-10-12&end_date=2026-10-01",
+        "date=2026-13-01",
+    ],
+)
+def test_locality_stats_rejects_invalid_filters(authed, query):
+    """Bad dates and contradictory filters are a 4xx, not a Postgres 500."""
+    response = authed.get(f"/api/v1/fire/locality-stats?{query}")
+
+    assert response.status_code == 422
 
 
 def test_fire_endpoints_require_a_session():
@@ -192,6 +294,7 @@ def test_fire_endpoints_require_a_session():
         "/api/v1/fire/dates",
         "/api/v1/fire/events",
         "/api/v1/fire/locality-stats",
+        "/api/v1/fire/provinces",
     ):
         assert client.get(path).status_code == 401, path
 

@@ -12,13 +12,13 @@ NASA FIRMS -> ingesta -> Kafka -> procesador (+ Open-Meteo) -> PostgreSQL/PostGI
 2. El procesador los consume, consulta temperatura, humedad y viento para la fecha y hora del sobrevuelo, calcula el riesgo y guarda el resultado en PostGIS.
 3. La API expone los datos y sirve un dashboard con Leaflet (mapa de puntos, mapa de calor, clústeres y un calendario para elegir el día).
 
-Desde el dashboard se accede a `/stats`, una sección de estadísticas agregadas por provincia y municipio (histórico completo o un día concreto, filtrable por país), con distribución de riesgo, evolución diaria y rankings de focos.
+Desde el dashboard se accede a `/stats`, una sección de estadísticas agregadas por provincia y municipio, con filtros de periodo (último día, semana, mes o año, una fecha concreta o un rango) y de provincia, distribución de riesgo, evolución diaria y rankings de focos.
 
 El riesgo es un score de 0 a 1 que combina la temperatura de brillo del satélite, el viento y la humedad del combustible fino (fórmula de Simard). Se clasifica en `low`, `moderate`, `high` o `extreme`.
 
 El clima se pide para el día del foco y, cuando FIRMS da `acq_time`, para la hora del sobrevuelo (UTC): un foco nocturno se puntúa con la noche, no con el máximo de la tarde. Si no hay hora, se usan los extremos del día (máxima temperatura, mínima humedad y máximo viento).
 
-La zona vigilada es España: península, Baleares y Canarias. Las cajas geográficas están ajustadas para dejar fuera la costa de Argelia.
+La zona vigilada es España: península, Baleares y Canarias. Las cajas geográficas están ajustadas para dejar fuera la costa de Argelia. Al ser cajas rectangulares, también capturan puntos de Portugal y del sur de Francia; la sección de estadísticas los conserva y etiqueta su país en el selector de provincia.
 
 Los datos de FIRMS son puntos (centros de píxel), no perímetros de incendio, así que el mapa muestra puntos y no polígonos.
 
@@ -121,7 +121,8 @@ Salvo `/`, `/health`, `/health/db` y las rutas `/login` y `/auth/*`, todo requie
 | `GET /api/v1/fire/events` | Focos. Filtros: `date`, `risk_level`, `min_risk_score`, `bbox` (`S,W,N,E`), `limit` |
 | `GET /api/v1/fire/stats` | Conteos por nivel de riesgo y score máximo, global o de un día (`?date=`) |
 | `GET /api/v1/fire/dates` | Fechas con datos, con total y riesgo máximo de cada una |
-| `GET /api/v1/fire/locality-stats` | Agregación por provincia y municipio; filtros `date`, `country`, `limit` |
+| `GET /api/v1/fire/locality-stats` | Agregación por provincia y municipio; filtros `date`, `start_date`, `end_date`, `province`, `limit` |
+| `GET /api/v1/fire/provinces` | Provincias/departamentos/distritos con focos, para el selector |
 | `POST /api/v1/fire/ingest` | Lanza una ingesta manual (`?bbox=&date=`) |
 | `GET /dashboard` | Interfaz web (mapa) |
 | `GET /stats` | Interfaz web de estadísticas |
@@ -132,4 +133,4 @@ Salvo `/`, `/health`, `/health/db` y las rutas `/login` y `/auth/*`, todo requie
 python -m pytest
 ```
 
-Son 127 tests que no necesitan red ni contenedores: usan `httpx.MockTransport` y fakes en memoria para Kafka y la base de datos.
+Son 132 tests que no necesitan red ni contenedores: usan `httpx.MockTransport` y fakes en memoria para Kafka y la base de datos.
