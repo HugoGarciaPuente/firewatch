@@ -5,9 +5,12 @@ import pytest
 from firewatch.config import resolve_regions
 from firewatch.services.processing import (
     InvalidRecord,
+    OutOfScope,
     _ensure_table,
     consume_and_process,
+    purge_out_of_scope,
     record_to_row,
+    upsert_record,
 )
 
 
@@ -359,3 +362,141 @@ def test_ingest_response_bbox_is_not_a_concatenated_string():
 class _StubProducer:
     def close(self):
         pass
+
+
+# ---------------------------------------------------------------------------
+# Territorial scope: the rectangular bboxes reach Portugal and southern France
+# ---------------------------------------------------------------------------
+
+
+def test_upsert_record_rejects_a_foreign_location(monkeypatch):
+    """A geocoded Portuguese point must never be stored, even inside the bbox."""
+    from firewatch.config import settings
+
+    monkeypatch.setattr(settings, "FIREWATCH_COUNTRY_CODES", "es")
+    conn = FakeConn()
+    record = {"acq_date": "2026-10-08", "latitude": 37.02, "longitude": -7.93}
+
+    with pytest.raises(OutOfScope) as exc:
+        upsert_record(conn, record, location={"country": "Portugal", "country_code": "pt"})
+
+    assert "Portugal" in str(exc.value)
+    assert not [s for kind, s, _ in conn.log if "INSERT INTO fire_events" in s]
+    assert conn.commits == 0
+
+
+def test_consumer_discards_out_of_scope_and_keeps_processing(monkeypatch):
+    """One Portuguese point must not stop the batch nor reach the database."""
+    from firewatch.config import settings
+
+    monkeypatch.setattr(settings, "FIREWATCH_COUNTRY_CODES", "es")
+
+    class PeninsularGeocode:
+        def get_location(self, lat, lon):
+            if lon < -6.5:  # Algarve
+                return {"locality": "Faro", "country": "Portugal", "country_code": "pt"}
+            return {"locality": "Madrid", "country": "España", "country_code": "es"}
+
+    portugal = {"acq_date": "2026-10-08", "latitude": 37.02, "longitude": -7.93}
+    spain = {"acq_date": "2026-10-08", "latitude": 40.42, "longitude": -3.70}
+
+    conn = FakeConn()
+    consumer = FakeConsumer(
+        [{("firms-ingest", 0): [FakeMessage(portugal), FakeMessage(spain)]}]
+    )
+
+    processed = consume_and_process(
+        consumer=consumer,
+        conn=conn,
+        batch_limit=1,
+        max_empty_polls=1,
+        weather_client=StubWeather(),
+        geocode_client=PeninsularGeocode(),
+    )
+
+    assert processed == 1
+    upserts = [
+        params
+        for kind, sql, params in conn.log
+        if kind == "execute" and "INSERT INTO fire_events" in sql
+    ]
+    assert len(upserts) == 1
+    # The stored point is Madrid (lon -3.70), not Faro: params[-3] is ST_MakePoint x.
+    assert upserts[0][-3] == pytest.approx(-3.70)
+
+
+class _PurgeCursor:
+    def __init__(self, log, rows):
+        self._log = log
+        self._rows = rows
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def execute(self, sql, params=None):
+        self._log.append((sql, params))
+
+    def fetchall(self):
+        return self._rows
+
+    def fetchone(self):
+        return (len(self._rows),)
+
+
+class _PurgeConn:
+    def __init__(self, rows):
+        self.log: list = []
+        self.commits = 0
+        self._rows = rows
+
+    def cursor(self):
+        return _PurgeCursor(self.log, self._rows)
+
+    def commit(self):
+        self.commits += 1
+
+
+def test_purge_out_of_scope_deletes_only_known_foreign_countries(monkeypatch):
+    from firewatch.config import settings
+
+    monkeypatch.setattr(settings, "FIREWATCH_COUNTRY_CODES", "es")
+    conn = _PurgeConn(rows=[(1,), (2,)])
+
+    removed = purge_out_of_scope(conn)
+
+    assert removed == 2
+    assert conn.commits == 1
+    (sql, params), = conn.log
+    assert "DELETE FROM fire_events" in sql
+    # Un país desconocido ('' o NULL) no se toca: aún puede geocodificarse.
+    assert "COALESCE(locality->>'country_code', '') <> ''" in sql
+    assert params == (["es"],)
+
+
+def test_purge_out_of_scope_dry_run_does_not_delete():
+    conn = _PurgeConn(rows=[(1,), (2,), (3,)])
+
+    removed = purge_out_of_scope(conn, dry_run=True)
+
+    assert removed == 3
+    assert conn.commits == 0
+    (sql, _), = conn.log
+    assert sql.startswith("SELECT COUNT(*)")
+    assert "DELETE" not in sql
+
+
+def test_purge_out_of_scope_refuses_an_empty_allowlist(monkeypatch):
+    """`<> ALL('{}')` matches every row: an empty scope would wipe the dataset."""
+    from firewatch.config import settings
+
+    monkeypatch.setattr(settings, "FIREWATCH_COUNTRY_CODES", " , ")
+    conn = _PurgeConn(rows=[])
+
+    with pytest.raises(ValueError):
+        purge_out_of_scope(conn)
+
+    assert conn.log == []
+    assert conn.commits == 0

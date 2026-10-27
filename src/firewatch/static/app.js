@@ -434,10 +434,11 @@ class FireWatchApp {
   /**
    * Formatea la localidad reverse-geocodificada.
    *
-   * El bbox de seguimiento no se limita a España: llega hasta los Pirineos
-   * franceses y el Algarve, así que ~39 de los focos guardados están en Francia
-   * y Portugal. El país solo se muestra cuando NO es España; en el interior es
-   * ruido, porque el usuario ya sabe que está mirando la península.
+   * El ámbito es España y el procesador descarta los puntos cuyo país
+   * geocodificado queda fuera, así que en la práctica el país no se muestra.
+   * La rama extranjera sigue aquí como red de seguridad para filas históricas o
+   * para un `FIREWATCH_COUNTRY_CODES` más amplio: sin ella, un foco de Portugal
+   * aparecería como si fuera de una provincia española.
    *
    * Devuelve HTML escapado o null si el punto todavía no tiene localidad
    * (aún sin pasar por `geocode-backfill`, o sin resolver en Nominatim).

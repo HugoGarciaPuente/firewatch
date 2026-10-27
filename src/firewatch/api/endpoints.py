@@ -251,10 +251,9 @@ def locality_stats(
     filtro ``province`` es exacto y se aplica después de la geocodificación.
 
     ``locality`` es el JSONB que escribe el geocodificador inverso. ``province`` es
-    la unidad administrativa intermedia (provincia española, departamento francés,
-    distrito portugués) y ``community`` el nivel superior (comunidad autónoma o
-    región). Las filas sin localidad resuelta (mar abierto, fallo de Nominatim) no
-    entran en los rankings, pero sí en los totales.
+    la unidad administrativa intermedia (la provincia española) y ``community`` el
+    nivel superior (comunidad autónoma). Las filas sin localidad resuelta (mar
+    abierto, fallo de Nominatim) no entran en los rankings, pero sí en los totales.
     """
     date = _parse_iso_date(date, "date")
     start_date = _parse_iso_date(start_date, "start_date")
@@ -479,12 +478,12 @@ def locality_stats(
 @router.get("/provinces", response_model=List[dict])
 def list_provinces() -> List[dict]:
     """
-    Lista las provincias/departamentos/distritos con al menos un foco localizado.
+    Lista las provincias con al menos un foco localizado.
 
-    La sección de estadísticas usa esta lista para el selector. Se devuelven todos
-    los niveles administrativos intermedios (también los de Portugal y Francia que
-    caen dentro de los bboxes), porque el filtro ``province`` es exacto: el
-    navegador añade el país al texto de las opciones extranjeras.
+    La sección de estadísticas usa esta lista para el selector. Solo aparecen las
+    provincias del ámbito vigilado: el procesador descarta los puntos cuyo país
+    geocodificado no está en ``FIREWATCH_COUNTRY_CODES``, y ``purge-out-of-scope``
+    limpia los que se guardaron antes de existir ese filtro.
     """
     try:
         conn = psycopg2.connect(settings.POSTGRES_DSN)

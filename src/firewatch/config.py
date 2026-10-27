@@ -44,6 +44,13 @@ class Settings:
     FIREWATCH_REGIONS: str = os.getenv(
         "FIREWATCH_REGIONS", "peninsula,peninsula_sur,canarias,baleares"
     )
+    # Ámbito territorial por código ISO-3166 alpha-2. Las cajas son rectángulos:
+    # la península incluye el Algarve portugués y los Pirineos franceses, y esos
+    # focos no pertenecen al seguimiento. El país solo se conoce después de
+    # geocodificar el punto, así que el filtro se aplica sobre
+    # `locality.country_code` en el procesador (evita ingerirlos) y en
+    # `runner purge-out-of-scope` (limpia los que ya estaban guardados).
+    FIREWATCH_COUNTRY_CODES: str = os.getenv("FIREWATCH_COUNTRY_CODES", "es")
 
     # Kafka
     KAFKA_BOOTSTRAP_SERVERS: str = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
@@ -169,3 +176,31 @@ def resolve_regions(bbox_arg=None, regions_arg=None):
             f"Available: {', '.join(sorted(settings.REGION_BBOXES))}"
         )
     return [(name, settings.REGION_BBOXES[name]) for name in expanded]
+
+
+def tracked_country_codes() -> set:
+    """Códigos ISO-3166 (minúscula) del ámbito vigilado, p. ej. ``{"es"}``."""
+    return {
+        code.strip().lower()
+        for code in settings.FIREWATCH_COUNTRY_CODES.split(",")
+        if code.strip()
+    }
+
+
+def country_in_scope(location=None) -> bool:
+    """
+    Indica si un punto geocodificado pertenece al ámbito vigilado.
+
+    Los bboxes son rectángulos y alcanzan Portugal y el sur de Francia, así que
+    ser "visible" para FIRMS no basta. El país real llega en
+    ``locality.country_code``; sin él (``locality`` NULL, ``{}`` o una respuesta de
+    Nominatim con solo ``display_name``) el punto se conserva: no hay evidencia de
+    que esté fuera y borrarlo impediría resolverlo en un ``geocode-backfill``
+    posterior.
+    """
+    if not location:
+        return True
+    code = str(location.get("country_code") or "").strip().lower()
+    if not code:
+        return True
+    return code in tracked_country_codes()

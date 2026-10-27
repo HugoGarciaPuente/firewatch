@@ -117,6 +117,18 @@ def test_daily_once_flag_is_wired():
     assert args.days == 5
 
 
+def test_purge_out_of_scope_flag_is_wired():
+    """Without this, `--dry-run` would silently delete instead of counting."""
+    from firewatch import runner
+
+    args = runner.build_parser().parse_args(["purge-out-of-scope"])
+    assert args.dry_run is False
+    assert args.func is runner.cmd_purge_out_of_scope
+
+    args = runner.build_parser().parse_args(["purge-out-of-scope", "--dry-run"])
+    assert args.dry_run is True
+
+
 # ---------------------------------------------------------------------------
 # Refresh resilience: retries and honest exit codes
 # ---------------------------------------------------------------------------

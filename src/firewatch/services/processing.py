@@ -16,7 +16,7 @@ from typing import Dict, Optional
 
 from kafka import KafkaConsumer
 
-from firewatch.config import settings
+from firewatch.config import country_in_scope, settings, tracked_country_codes
 from firewatch.services.risk import score_event
 
 logger = logging.getLogger(__name__)
@@ -96,6 +96,15 @@ def _ensure_table(conn) -> None:
 
 class InvalidRecord(ValueError):
     """Lanzada cuando un registro no puede persistirse (campos clave ausentes o inválidos)."""
+
+
+class OutOfScope(InvalidRecord):
+    """El punto geocodificado cae en un país fuera de ``FIREWATCH_COUNTRY_CODES``.
+
+    Hereda de ``InvalidRecord`` porque el consumidor ya sabe descartar esos
+    mensajes sin detener la partición; la excepción propia solo permite
+    contarlos y registrarlos aparte.
+    """
 
 
 def _first_present(record: Dict, *keys: str):
@@ -179,8 +188,18 @@ def upsert_record(
     ``location`` es la toponimia geocodificada. Nunca se sobrescribe con NULL: FIRMS reemite
     días recientes, por lo que una ingesta posterior del mismo punto puede llegar mientras
     la geocodificación está desactivada o Nominatim caído.
+
+    Lanza ``OutOfScope`` si la localidad resuelta pertenece a un país fuera del ámbito
+    (``FIREWATCH_COUNTRY_CODES``): el punto nunca debe llegar a la tabla, porque las cajas
+    rectangulares también capturan Portugal y el sur de Francia.
     """
     row = record_to_row(record)
+    if not country_in_scope(location):
+        raise OutOfScope(
+            f"point ({row[1]}, {row[2]}) is in "
+            f"{location.get('country') or location.get('country_code')}, "
+            f"outside {sorted(tracked_country_codes())}"
+        )
     risk = score_event(record, weather=weather)
     risk_level = risk["risk_level"]
     risk_score = risk["score"]
@@ -212,6 +231,37 @@ def upsert_record(
     conn.commit()
     logger.info("Upserted FIRMS record (%s, %s) risk=%s (%.2f)", row[1], row[2], risk_level, risk_score)
     return risk
+
+
+def purge_out_of_scope(conn, dry_run: bool = False) -> int:
+    """
+    Elimina (o cuenta, con ``dry_run``) los focos ya guardados cuyo país
+    geocodificado no pertenece a ``FIREWATCH_COUNTRY_CODES``.
+
+    Existe porque el filtro del procesador solo protege las filas nuevas: el
+    histórico se ingestó cuando el ámbito se definía únicamente por bbox, y esas
+    cajas rectangulares incluyen Portugal y el sur de Francia. Es idempotente y
+    deja intactas las filas sin país resuelto (NULL o ``{}``), que todavía pueden
+    geocodificarse.
+    """
+    codes = sorted(tracked_country_codes())
+    if not codes:
+        # `<> ALL('{}')` es cierto para toda fila con país: un ámbito vacío
+        # borraría el dataset entero en silencio.
+        raise ValueError("FIREWATCH_COUNTRY_CODES is empty; refusing to purge everything")
+
+    where = """
+        COALESCE(locality->>'country_code', '') <> ''
+        AND LOWER(locality->>'country_code') <> ALL(%s)
+    """
+    with conn.cursor() as cur:
+        if dry_run:
+            cur.execute(f"SELECT COUNT(*) FROM fire_events WHERE {where}", (codes,))
+            return int(cur.fetchone()[0])
+        cur.execute(f"DELETE FROM fire_events WHERE {where} RETURNING id", (codes,))
+        removed = len(cur.fetchall())
+    conn.commit()
+    return removed
 
 
 def consume_and_process(
@@ -260,6 +310,7 @@ def consume_and_process(
 
     processed = 0
     skipped = 0
+    out_of_scope = 0
     empty_polls = 0
     try:
         while batch_limit is None or processed < batch_limit:
@@ -302,6 +353,10 @@ def consume_and_process(
                     # Un registro malformado no debe detener el consumidor
                     try:
                         upsert_record(conn, record, weather=weather, location=location)
+                    except OutOfScope as exc:
+                        out_of_scope += 1
+                        logger.info("Discarding out-of-scope FIRMS record: %s", exc)
+                        continue
                     except InvalidRecord as exc:
                         skipped += 1
                         logger.error("Discarding invalid FIRMS record: %s", exc)
@@ -328,8 +383,11 @@ def consume_and_process(
             conn.close()
             logger.info("Database connection closed")
 
-    if skipped:
+    if skipped or out_of_scope:
         logger.warning(
-            "Processed %d messages, discarded %d invalid record(s)", processed, skipped
+            "Processed %d messages, discarded %d invalid and %d out-of-scope record(s)",
+            processed,
+            skipped,
+            out_of_scope,
         )
     return processed

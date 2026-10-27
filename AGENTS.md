@@ -21,7 +21,7 @@ firewatch/
 │   ├── firewatch/              # Main Python package
 │   │   ├── __init__.py
 │   │   ├── config.py           # Settings: env vars + REGION_BBOXES
-│   │   ├── runner.py           # CLI: ingest / backfill / daily / process / geocode-backfill
+│   │   ├── runner.py           # CLI: ingest / backfill / daily / process / geocode-backfill / purge-out-of-scope
 │   │   ├── clients/            # External API clients (all outbound calls here)
 │   │   │   ├── __init__.py
 │   │   │   ├── firms.py        # NASA FIRMS API client
@@ -74,12 +74,15 @@ firewatch/
 
 ## Domain Scope
 
-Tracking covers **only Península Ibérica, Baleares and Canarias** (see
-`settings.REGION_BBOXES`). Do not widen the default scope: a continental
-European bbox produces ~76× more daily records with no value for these
-territories. `resolve_regions()` in `config.py` is the single place that
-resolves scope (`--bbox` > `--regions` > `FIREWATCH_REGIONS`); it lives in
-`config` so the API can use it without importing the CLI.
+Tracking covers **only Spain** (Península, Baleares and Canarias): the bboxes in
+`settings.REGION_BBOXES` define what FIRMS is asked for, and
+`FIREWATCH_COUNTRY_CODES` (default `es`) defines what is kept once the point is
+geocoded. Do not widen the default scope: a continental European bbox produces
+~76× more daily records with no value for these territories.
+`resolve_regions()` in `config.py` is the single place that resolves the boxes
+(`--bbox` > `--regions` > `FIREWATCH_REGIONS`); it lives in `config` so the API
+can use it without importing the CLI. `country_in_scope()` is the equivalent for
+the country allowlist.
 
 ## Available Commands
 
@@ -88,12 +91,13 @@ resolves scope (`--bbox` > `--regions` > `FIREWATCH_REGIONS`); it lives in
 - `docker compose logs -f refresh` - Watch the FIRMS refresh loop
 - `docker compose ps` - Confirm the five services are up (only `api`, `postgres` and `kafka` expose a healthcheck)
 - `pip install -e .` or `pip install -r requirements-dev.txt` - Local dev setup
-- `pytest` - Run tests (133 tests, no live services required)
+- `pytest` - Run tests (142 tests, no live services required)
 - `python -m firewatch.runner ingest` - One-shot FIRMS fetch -> Kafka
 - `python -m firewatch.runner backfill --start-date D --end-date D` - Historical load (one request per day)
 - `python -m firewatch.runner daily --days 3` - Loop that keeps data fresh
 - `python -m firewatch.runner process` - Consumer -> PostGIS (continuous)
 - `python -m firewatch.runner geocode-backfill --limit N` - Fill in missing localities (rate-limited)
+- `python -m firewatch.runner purge-out-of-scope [--dry-run]` - Delete stored points whose geocoded country is outside `FIREWATCH_COUNTRY_CODES` (idempotent)
 
 ## Gotchas
 
@@ -124,10 +128,19 @@ resolves scope (`--bbox` > `--regions` > `FIREWATCH_REGIONS`); it lives in
   año" computed from `date.today()` would open empty windows. `/stats` reads
   `last_date` from `/api/v1/fire/stats`; the API range is inclusive on both ends.
 - **The province selector filters, it does not define the dataset scope.**
-  `/api/v1/fire/provinces` returns every `locality.province` (Spanish provinces,
-  Portuguese districts, French departments); the browser appends the country to
-  foreign options. "Todas las provincias" means the whole dataset, including
-  those spillover points; do not silently drop them from the selector.
+  `/api/v1/fire/provinces` returns every `locality.province` in the table, and
+  the table only holds the tracked country. "Todas las provincias" means the
+  whole dataset, not "the province where I am looking": do not silently apply a
+  second geographic filter in the browser.
+- **The bboxes are rectangles: `peninsula` reaches the Algarve and southern
+  France.** A point visible to FIRMS is not necessarily in Spain. The real
+  country only arrives with the reverse geocoding, so `upsert_record` raises
+  `OutOfScope` when `locality.country_code` is not in `FIREWATCH_COUNTRY_CODES`
+  (default `es`) and the consumer counts it without storing it. Rows with no
+  country yet are kept on purpose (they can still be resolved later);
+  `runner purge-out-of-scope` cleans the ones stored before the filter existed.
+  It is idempotent, but deleting is forever: run `--dry-run` first and remember
+  that widening the allowlist does not bring the rows back.
 - **Adding an import can break a container, not just the code.**
   `requirements/` is split per tier, so a new third-party import in
   `services/` means only the tiers that reach it get the package. The image

@@ -7,12 +7,14 @@ necesidad de levantar la API HTTP:
     backfill  :  descargar FIRMS para N días consecutivos -> Kafka (histórico)
     process   :  consumir Kafka -> upsert en PostgreSQL/PostGIS (continuo)
     daily     :  bucle que mantiene el dataset actualizado (re-consulta ventana rodante)
+    purge-out-of-scope : borrar focos guardados fuera de FIREWATCH_COUNTRY_CODES
 
 Uso:
     python -m firewatch.runner ingest  [--bbox S,W,N,E] [--date AAAA-MM-DD] [--dry-run]
     python -m firewatch.runner backfill [--bbox S,W,N,E] [--start-date D] [--end-date D]
     python -m firewatch.runner daily    [--bbox S,W,N,E] [--days N] [--interval-minutes N]
     python -m firewatch.runner process [--limit N] [--max-empty-polls N]
+    python -m firewatch.runner purge-out-of-scope [--dry-run]
 
 Flujo E2E típico (en dos terminales):
     terminal 1:  python -m firewatch.runner process
@@ -31,9 +33,9 @@ from pathlib import Path
 import time
 
 from firewatch.clients.firms import FirmsClient
-from firewatch.config import resolve_regions, settings
+from firewatch.config import resolve_regions, settings, tracked_country_codes
 from firewatch.services.ingestion import create_producer, run_ingestion
-from firewatch.services.processing import consume_and_process, create_consumer
+from firewatch.services.processing import consume_and_process, create_consumer, purge_out_of_scope
 
 logger = logging.getLogger("firewatch.runner")
 
@@ -439,6 +441,40 @@ def cmd_geocode_backfill(args: argparse.Namespace) -> int:
         conn.close()
 
 
+def cmd_purge_out_of_scope(args: argparse.Namespace) -> int:
+    """
+    Borra del histórico los focos cuyo país geocodificado queda fuera del ámbito.
+
+    El procesador ya descarta los nuevos (``FIREWATCH_COUNTRY_CODES``), pero los
+    ingestados antes del filtro siguen en `fire_events`. Las cajas rectangulares
+    de la península alcanzan el Algarve y los Pirineos franceses, así que sin esta
+    limpieza el dashboard seguiría mostrándolos. ``--dry-run`` cuenta sin borrar.
+    """
+    # psycopg2 se importa aquí, no en el módulo: la imagen de adquisición no
+    # incluye el driver y solo necesita `runner daily`.
+    import psycopg2
+
+    conn = psycopg2.connect(settings.POSTGRES_DSN)
+    try:
+        removed = purge_out_of_scope(conn, dry_run=args.dry_run)
+    finally:
+        conn.close()
+
+    if args.dry_run:
+        logger.info(
+            "Out of scope (%s): %d row(s) would be deleted. Re-run without --dry-run to apply.",
+            sorted(tracked_country_codes()),
+            removed,
+        )
+    else:
+        logger.info(
+            "Out of scope (%s): %d row(s) deleted.",
+            sorted(tracked_country_codes()),
+            removed,
+        )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="firewatch",
@@ -529,6 +565,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Reintentar también puntos marcados previamente sin localidad",
     )
     p_geocode.set_defaults(func=cmd_geocode_backfill)
+
+    p_purge = sub.add_parser(
+        "purge-out-of-scope",
+        help="Eliminar focos guardados cuyo país geocodificado no está en "
+        f"{settings.FIREWATCH_COUNTRY_CODES!r} (por defecto: solo España)",
+    )
+    p_purge.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Contar las filas afectadas sin borrarlas",
+    )
+    p_purge.set_defaults(func=cmd_purge_out_of_scope)
 
     return parser
 

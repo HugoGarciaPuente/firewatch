@@ -18,7 +18,7 @@ El riesgo es un score de 0 a 1 que combina la temperatura de brillo del satélit
 
 El clima se pide para el día del foco y, cuando FIRMS da `acq_time`, para la hora del sobrevuelo (UTC): un foco nocturno se puntúa con la noche, no con el máximo de la tarde. Si no hay hora, se usan los extremos del día (máxima temperatura, mínima humedad y máximo viento).
 
-La zona vigilada es España: península, Baleares y Canarias. Las cajas geográficas están ajustadas para dejar fuera la costa de Argelia. Al ser cajas rectangulares, también capturan puntos de Portugal y del sur de Francia; la sección de estadísticas los conserva y etiqueta su país en el selector de provincia.
+La zona vigilada es España: península, Baleares y Canarias. Las cajas geográficas están ajustadas para dejar fuera la costa de Argelia. Al ser cajas rectangulares, también capturan puntos de Portugal y del sur de Francia; el país real se conoce al geocodificar el punto, así que el procesador descarta lo que no esté en `FIREWATCH_COUNTRY_CODES` (por defecto `es`) y `runner purge-out-of-scope` limpia el histórico ingestado antes de ese filtro.
 
 Los datos de FIRMS son puntos (centros de píxel), no perímetros de incendio, así que el mapa muestra puntos y no polígonos.
 
@@ -39,7 +39,7 @@ Código:
 ```
 src/firewatch/
 ├── config.py        # configuración y bounding boxes
-├── runner.py        # CLI (ingest, backfill, daily, process, geocode-backfill)
+├── runner.py        # CLI (ingest, backfill, daily, process, geocode-backfill, purge-out-of-scope)
 ├── clients/         # FIRMS, Open-Meteo (caché por celda 0.25° y fecha), Nominatim
 ├── services/        # ingestion, processing, risk
 ├── api/             # app FastAPI, endpoints, autenticación, rate limit
@@ -108,6 +108,10 @@ python -m firewatch.runner process --max-empty-polls 3
 
 # Rellenar municipio y provincia de eventos antiguos
 python -m firewatch.runner geocode-backfill --limit 50
+
+# Borrar focos ya guardados fuera del ámbito (Portugal, sur de Francia)
+python -m firewatch.runner purge-out-of-scope --dry-run
+python -m firewatch.runner purge-out-of-scope
 ```
 
 El modo `daily` vuelve a consultar los últimos días porque la NASA sigue publicando focos de forma tardía. Si alguna región falla tras los reintentos, el proceso termina con código 1.
@@ -122,7 +126,7 @@ Salvo `/`, `/health`, `/health/db` y las rutas `/login` y `/auth/*`, todo requie
 | `GET /api/v1/fire/stats` | Conteos por nivel de riesgo y score máximo, global o de un día (`?date=`) |
 | `GET /api/v1/fire/dates` | Fechas con datos, con total y riesgo máximo de cada una |
 | `GET /api/v1/fire/locality-stats` | Agregación por provincia y municipio; filtros `date`, `start_date`, `end_date`, `province`, `limit` |
-| `GET /api/v1/fire/provinces` | Provincias/departamentos/distritos con focos, para el selector |
+| `GET /api/v1/fire/provinces` | Provincias con focos (solo el ámbito vigilado), para el selector |
 | `POST /api/v1/fire/ingest` | Lanza una ingesta manual (`?bbox=&date=`) |
 | `GET /dashboard` | Interfaz web (mapa) |
 | `GET /stats` | Interfaz web de estadísticas |
