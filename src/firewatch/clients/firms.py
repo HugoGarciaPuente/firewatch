@@ -48,7 +48,7 @@ class FirmsClient:
         client: Optional[httpx.Client] = None,
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
-        source: str = "VIIRS_SNPP_NRT",
+        source: Optional[str] = None,
     ):
         resolved_key = (
             api_key if api_key is not None else settings.NASA_FIRMS_API_KEY
@@ -65,7 +65,7 @@ class FirmsClient:
         self._client = client or httpx.Client()
         self.base_url = (base_url or settings.NASA_FIRMS_BASE_URL).rstrip("/")
         self.api_key = resolved_key
-        self.source = source
+        self.source = source or settings.NASA_FIRMS_SOURCE
 
     def fetch_by_bbox(self, bbox: str, date: Optional[str] = None) -> List[Dict]:
         """

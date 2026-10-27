@@ -14,6 +14,22 @@ def _client_with_handler(handler, api_key: str = "mock-key") -> FirmsClient:
     )
 
 
+def test_source_defaults_to_the_configured_product(monkeypatch):
+    """The product must be switchable by env, and a caller can still override it.
+
+    NRT only reaches ~4 months back and SP ends where the standard product has
+    been processed, so a summer backfill needs to pick the source per period.
+    """
+    from firewatch.config import settings
+
+    monkeypatch.setattr(settings, "NASA_FIRMS_SOURCE", "VIIRS_SNPP_SP")
+    assert FirmsClient(api_key="mock-key").source == "VIIRS_SNPP_SP"
+    assert (
+        FirmsClient(api_key="mock-key", source="VIIRS_NOAA21_NRT").source
+        == "VIIRS_NOAA21_NRT"
+    )
+
+
 def test_fetch_by_bbox_returns_list_of_records(firms_sample):
     def handler(request: httpx.Request) -> httpx.Response:
         assert "/area/csv" in request.url.path

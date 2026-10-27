@@ -22,6 +22,10 @@ class Settings:
     NASA_FIRMS_DATE: str = os.getenv("NASA_FIRMS_DATE", "")  # vacío = hoy
     # Secreto: registrarse en https://firms.modaps.eosdis.nasa.gov/api/area/
     NASA_FIRMS_API_KEY: str = os.getenv("NASA_FIRMS_API_KEY", "")
+    # Producto de FIRMS. Cada uno cubre una ventana distinta: el NRT solo llega
+    # ~4 meses atrás y el SP (producto estándar) tarda meses en procesarse. Para
+    # junio hace falta VIIRS_SNPP_SP; desde julio, VIIRS_SNPP_NRT.
+    NASA_FIRMS_SOURCE: str = os.getenv("NASA_FIRMS_SOURCE", "VIIRS_SNPP_NRT")
 
     # Regiones de seguimiento. El área continental europea genera decenas de
     # miles de focos diarios que no aportan a un aviso de riesgo sobre estos

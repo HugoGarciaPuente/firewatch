@@ -91,7 +91,7 @@ the country allowlist.
 - `docker compose logs -f refresh` - Watch the FIRMS refresh loop
 - `docker compose ps` - Confirm the five services are up (only `api`, `postgres` and `kafka` expose a healthcheck)
 - `pip install -e .` or `pip install -r requirements-dev.txt` - Local dev setup
-- `pytest` - Run tests (142 tests, no live services required)
+- `pytest` - Run tests (145 tests, no live services required)
 - `python -m firewatch.runner ingest` - One-shot FIRMS fetch -> Kafka
 - `python -m firewatch.runner backfill --start-date D --end-date D` - Historical load (one request per day)
 - `python -m firewatch.runner daily --days 3` - Loop that keeps data fresh
@@ -141,6 +141,23 @@ the country allowlist.
   `runner purge-out-of-scope` cleans the ones stored before the filter existed.
   It is idempotent, but deleting is forever: run `--dry-run` first and remember
   that widening the allowlist does not bring the rows back.
+- **A multi-month backfill is a single-threaded geocoding job.** ~14k points at
+  `GEOCODE_MIN_INTERVAL` (1.1 s) is ~4 h of Nominatim. Do not run
+  `geocode-backfill` at the same time: they share the 1 req/s budget. The
+  processor keeps consuming while the API serves partial data, so the dashboard
+  fills in as the job advances.
+- **FIRMS NRT and SP cover different windows.** The area API's
+  `data_availability` endpoint is the source of truth: SNPP_NRT starts
+  2026-07-01 and SNPP_SP ends 2026-06-30, so a summer backfill needs
+  `--source VIIRS_SNPP_SP` for June; NRT keeps only ~4 months. SNPP NRT also has
+  a hole on 2026-07-11..16 (NOAA-20/21 return data those days), filled with
+  `VIIRS_NOAA21_NRT`: re-running SNPP later adds different pixel centres for the
+  same fires instead of replacing them.
+- **`max_poll_records` must fit inside `max_poll_interval_ms`.** Geocoding costs
+  ~1.1 s per record, so the old 500-record batch took ~9 min and Kafka evicted
+  the consumer mid-batch; a large backfill would rebalance and reprocess. 25
+  keeps the batch under the 5-minute poll interval, and `test_processing` pins
+  the arithmetic instead of the number alone.
 - **Adding an import can break a container, not just the code.**
   `requirements/` is split per tier, so a new third-party import in
   `services/` means only the tiers that reach it get the package. The image

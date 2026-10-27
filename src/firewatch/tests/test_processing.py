@@ -2,7 +2,7 @@
 
 import pytest
 
-from firewatch.config import resolve_regions
+from firewatch.config import resolve_regions, settings
 from firewatch.services.processing import (
     InvalidRecord,
     OutOfScope,
@@ -500,3 +500,25 @@ def test_purge_out_of_scope_refuses_an_empty_allowlist(monkeypatch):
 
     assert conn.log == []
     assert conn.commits == 0
+
+
+def test_consumer_batches_fit_inside_the_poll_interval(monkeypatch):
+    """A batch must be processed before Kafka evicts the consumer mid-batch.
+
+    Geocoding costs ``GEOCODE_MIN_INTERVAL`` per record; the old 500-record batch
+    took ~9 min and exceeded ``max_poll_interval_ms`` (5 min), so a large backfill
+    would rebalance every batch and reprocess records.
+    """
+    import firewatch.services.processing as processing
+
+    captured = {}
+
+    class FakeKafkaConsumer:
+        def __init__(self, *args, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr(processing, "KafkaConsumer", FakeKafkaConsumer)
+    processing.create_consumer()
+
+    batch_seconds = captured["max_poll_records"] * settings.GEOCODE_MIN_INTERVAL
+    assert batch_seconds < captured["max_poll_interval_ms"] / 1000

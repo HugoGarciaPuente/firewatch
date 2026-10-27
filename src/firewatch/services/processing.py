@@ -37,8 +37,11 @@ def create_consumer(
         value_deserializer=lambda v: json.loads(v.decode("utf-8")),
         session_timeout_ms=30000,        # 30s (por defecto 10s)
         heartbeat_interval_ms=3000,      # 3s
-        max_poll_interval_ms=300000,     # 5min para procesamiento lento
-        max_poll_records=500            # lote controlado
+        max_poll_interval_ms=300000,     # 5min
+        # La geocodificación inversa cuesta ~1.1 s por registro. Un lote de 500
+        # tardaría ~9 min y superaría max_poll_interval_ms: el grupo expulsa al
+        # consumidor a mitad de lote y lo reasigna. 25 lo mantiene por debajo.
+        max_poll_records=25
     )
 
 

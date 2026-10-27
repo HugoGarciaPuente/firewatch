@@ -97,6 +97,8 @@ python -m firewatch.runner ingest --bbox 37.0,-9.6,43.9,3.6
 
 # Carga de un rango de fechas
 python -m firewatch.runner backfill --start-date 2026-10-01 --end-date 2026-10-15
+# El NRT solo conserva ~4 meses: junio se pide al producto estándar (SP)
+python -m firewatch.runner backfill --start-date 2026-06-01 --end-date 2026-06-30 --source VIIRS_SNPP_SP
 
 # Refresco periódico de los últimos días (es lo que ejecuta el contenedor refresh)
 python -m firewatch.runner daily --days 3 --interval-minutes 360

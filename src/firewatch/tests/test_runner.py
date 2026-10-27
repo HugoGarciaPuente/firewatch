@@ -129,6 +129,43 @@ def test_purge_out_of_scope_flag_is_wired():
     assert args.dry_run is True
 
 
+def test_backfill_passes_the_source_to_the_client(monkeypatch):
+    """`--source` must reach the client, not just the parser: June needs SP.
+
+    The NRT product only keeps ~4 months, so the summer backfill would silently
+    miss June if the flag were parsed but ignored.
+    """
+    from firewatch import runner
+
+    seen = {}
+
+    class FakeClient:
+        def __init__(self, source=None):
+            seen["source"] = source
+
+        def fetch_by_bbox(self, bbox, date=None):
+            return []
+
+    monkeypatch.setattr(runner, "FirmsClient", FakeClient)
+    args = runner.build_parser().parse_args(
+        [
+            "backfill",
+            "--regions",
+            "canarias",
+            "--start-date",
+            "2026-06-01",
+            "--end-date",
+            "2026-06-01",
+            "--source",
+            "VIIRS_SNPP_SP",
+            "--dry-run",
+        ]
+    )
+
+    assert runner.cmd_backfill(args) == 0
+    assert seen["source"] == "VIIRS_SNPP_SP"
+
+
 # ---------------------------------------------------------------------------
 # Refresh resilience: retries and honest exit codes
 # ---------------------------------------------------------------------------

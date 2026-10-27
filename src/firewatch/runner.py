@@ -126,7 +126,7 @@ def cmd_backfill(args: argparse.Namespace) -> int:
         logger.error("start-date (%s) is after end-date (%s)", start, end)
         return 1
 
-    client = FirmsClient()
+    client = FirmsClient(source=args.source)
     producer = None
     total = 0
     per_day = []
@@ -507,6 +507,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_backfill.add_argument("--start-date", default=None, help="AAAA-MM-DD (inclusive)")
     p_backfill.add_argument("--end-date", default=None, help="AAAA-MM-DD (inclusive; por defecto: hoy)")
+    p_backfill.add_argument(
+        "--source",
+        default=None,
+        help="Producto de FIRMS (por defecto NASA_FIRMS_SOURCE=%s). El NRT solo "
+        "llega ~4 meses atrás; para junio usa VIIRS_SNPP_SP."
+        % settings.NASA_FIRMS_SOURCE,
+    )
     p_backfill.add_argument("--dry-run", action="store_true", help="Descargar sin publicar")
     p_backfill.set_defaults(func=cmd_backfill)
 
