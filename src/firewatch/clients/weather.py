@@ -16,8 +16,10 @@ focos nocturnos se puntúan con la noche, no con el máximo de la tarde. Sin ``a
 usan los extremos del día (máxima temperatura, mínima humedad, máximo viento), que es la
 agregación conservadora estándar de los índices de peligro.
 
-Si la fecha queda fuera de la ventana histórica que cubre ``OPEN_METEO_BASE_URL``, la
-petición falla y se devuelve ``None``; el histórico antiguo requiere la API de archivo (ERA5).
+Si la fecha queda fuera de la ventana que cubre la API de previsión (~92 días),
+la consulta va al archivo ERA5 (``OPEN_METEO_ARCHIVE_URL``), que expone las mismas
+series horarias. Sin ese salto, un backfill de verano recibe 400 y el foco se
+puntúa solo por brillo.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from datetime import date as date_cls, datetime, timezone
 from typing import Dict, Optional
 
 import httpx
@@ -44,11 +47,21 @@ class WeatherClient:
         self,
         client: Optional[httpx.Client] = None,
         base_url: Optional[str] = None,
+        archive_url: Optional[str] = None,
+        forecast_days: Optional[int] = None,
         cell_degrees: Optional[float] = None,
         failure_ttl: float = _FAILURE_TTL_SECONDS,
     ):
         self._client = client or httpx.Client()
         self.base_url = (base_url or settings.OPEN_METEO_BASE_URL).rstrip("/")
+        self.archive_url = (
+            archive_url or settings.OPEN_METEO_ARCHIVE_URL
+        ).rstrip("/")
+        self.forecast_days = (
+            forecast_days
+            if forecast_days is not None
+            else int(settings.OPEN_METEO_FORECAST_DAYS)
+        )
         self.cell_degrees = (
             cell_degrees if cell_degrees is not None else float(settings.WEATHER_CACHE_CELL)
         )
@@ -57,6 +70,17 @@ class WeatherClient:
         self._cache: Dict[tuple, Dict] = {}
         self._failures: Dict[tuple, float] = {}
         self._lock = threading.Lock()
+
+    def _url_for(self, date: Optional[str]) -> str:
+        """Elige previsión o archivo ERA5 según la antigüedad de la fecha."""
+        if date is None:
+            return self.base_url
+        try:
+            requested = date_cls.fromisoformat(date)
+        except ValueError:
+            return self.base_url
+        age = (datetime.now(timezone.utc).date() - requested).days
+        return self.archive_url if age > self.forecast_days else self.base_url
 
     def _cell(self, latitude: float, longitude: float) -> tuple:
         """Ajusta las coordenadas a una celda de cuadrícula para compartir consultas cercanas."""
@@ -124,6 +148,11 @@ class WeatherClient:
             return cached
         return _metrics_at_hour(cached, _acq_hour(acq_time))
 
+    def _request(self, url: str, params: Dict) -> Dict:
+        response = self._client.get(url, params=params, timeout=10.0)
+        response.raise_for_status()
+        return response.json()
+
     def _fetch(
         self,
         latitude: float,
@@ -144,10 +173,9 @@ class WeatherClient:
             params["end_date"] = date
             params["timezone"] = "GMT"
 
+        url = self._url_for(date)
         try:
-            response = self._client.get(self.base_url, params=params, timeout=10.0)
-            response.raise_for_status()
-            data = response.json()
+            data = self._request(url, params)
         except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
             logger.warning(
                 "Consulta meteorológica fallida para (%.4f, %.4f) %s: %s",
@@ -156,7 +184,27 @@ class WeatherClient:
                 date or "actual",
                 exc,
             )
-            return None
+            data = None
+
+        # El borde de la ventana de previsión responde 200 con series vacías (o
+        # 400): el archivo ERA5 sí tiene ese día. Sin este reintento el foco se
+        # puntúa solo por brillo, sin que el resultado parezca erróneo.
+        if (
+            date is not None
+            and url != self.archive_url
+            and not _has_hourly_series((data or {}).get("hourly") or {})
+        ):
+            try:
+                data = self._request(self.archive_url, params)
+            except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
+                logger.warning(
+                    "Consulta meteorológica al archivo fallida para (%.4f, %.4f) %s: %s",
+                    latitude,
+                    longitude,
+                    date,
+                    exc,
+                )
+                return None
 
         if not isinstance(data, dict):
             logger.warning("Respuesta meteorológica inesperada para %s", date or "actual")

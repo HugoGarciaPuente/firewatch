@@ -91,7 +91,7 @@ the country allowlist.
 - `docker compose logs -f refresh` - Watch the FIRMS refresh loop
 - `docker compose ps` - Confirm the five services are up (only `api`, `postgres` and `kafka` expose a healthcheck)
 - `pip install -e .` or `pip install -r requirements-dev.txt` - Local dev setup
-- `pytest` - Run tests (145 tests, no live services required)
+- `pytest` - Run tests (147 tests, no live services required)
 - `python -m firewatch.runner ingest` - One-shot FIRMS fetch -> Kafka
 - `python -m firewatch.runner backfill --start-date D --end-date D` - Historical load (one request per day)
 - `python -m firewatch.runner daily --days 3` - Loop that keeps data fresh
@@ -153,6 +153,11 @@ the country allowlist.
   a hole on 2026-07-11..16 (NOAA-20/21 return data those days), filled with
   `VIIRS_NOAA21_NRT`: re-running SNPP later adds different pixel centres for the
   same fires instead of replacing them.
+- **Open-Meteo's forecast API only keeps ~30 days.** `WeatherClient` uses the
+  ERA5 archive for older dates and retries the archive when the forecast returns
+  a 200 with 24 nulls. This is not cosmetic: without it the score silently falls
+  back to brightness alone, and a summer backfill looks successful while its
+  risk values are not comparable to the rest. `test_clients` pins both paths.
 - **`max_poll_records` must fit inside `max_poll_interval_ms`.** Geocoding costs
   ~1.1 s per record, so the old 500-record batch took ~9 min and Kafka evicted
   the consumer mid-batch; a large backfill would rebalance and reprocess. 25

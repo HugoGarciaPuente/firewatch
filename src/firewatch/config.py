@@ -64,6 +64,14 @@ class Settings:
     OPEN_METEO_BASE_URL: str = os.getenv(
         "OPEN_METEO_BASE_URL", "https://api.open-meteo.com/v1/forecast"
     )
+    # /v1/forecast solo conserva ~30 días con datos (más atrás responde series
+    # vacías o 400); el archivo ERA5 sí tiene el histórico completo. Un backfill
+    # de verano pide fechas más antiguas: sin este host secundario Open-Meteo
+    # responde 400 y el foco se puntúa solo por brillo.
+    OPEN_METEO_ARCHIVE_URL: str = os.getenv(
+        "OPEN_METEO_ARCHIVE_URL", "https://archive-api.open-meteo.com/v1/archive"
+    )
+    OPEN_METEO_FORECAST_DAYS: int = int(os.getenv("OPEN_METEO_FORECAST_DAYS", "30"))
     ENABLE_WEATHER_ENRICHMENT: bool = os.getenv(
         "ENABLE_WEATHER_ENRICHMENT", "true"
     ).lower() in ("true", "1", "yes")

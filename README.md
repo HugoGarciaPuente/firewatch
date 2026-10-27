@@ -16,7 +16,7 @@ Desde el dashboard se accede a `/stats`, una sección de estadísticas agregadas
 
 El riesgo es un score de 0 a 1 que combina la temperatura de brillo del satélite, el viento y la humedad del combustible fino (fórmula de Simard). Se clasifica en `low`, `moderate`, `high` o `extreme`.
 
-El clima se pide para el día del foco y, cuando FIRMS da `acq_time`, para la hora del sobrevuelo (UTC): un foco nocturno se puntúa con la noche, no con el máximo de la tarde. Si no hay hora, se usan los extremos del día (máxima temperatura, mínima humedad y máximo viento).
+El clima se pide para el día del foco y, cuando FIRMS da `acq_time`, para la hora del sobrevuelo (UTC): un foco nocturno se puntúa con la noche, no con el máximo de la tarde. Si no hay hora, se usan los extremos del día (máxima temperatura, mínima humedad y máximo viento). Para fechas fuera de la ventana de previsión de Open-Meteo (~30 días) se consulta su archivo ERA5, con las mismas variables horarias.
 
 La zona vigilada es España: península, Baleares y Canarias. Las cajas geográficas están ajustadas para dejar fuera la costa de Argelia. Al ser cajas rectangulares, también capturan puntos de Portugal y del sur de Francia; el país real se conoce al geocodificar el punto, así que el procesador descarta lo que no esté en `FIREWATCH_COUNTRY_CODES` (por defecto `es`) y `runner purge-out-of-scope` limpia el histórico ingestado antes de ese filtro.
 

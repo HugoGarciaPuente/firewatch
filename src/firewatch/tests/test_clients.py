@@ -200,6 +200,88 @@ def test_weather_client_caches_failures():
     assert calls["n"] == 1
 
 
+def test_weather_client_uses_the_archive_for_old_dates():
+    """The forecast endpoint only reaches ~90 days back; summer history needs ERA5.
+
+    Without this, Open-Meteo answers 400 for June and every point is scored on
+    brightness alone -- silently, because the fallback is a valid risk value.
+    """
+    from datetime import date as date_cls, timedelta
+
+    from firewatch.clients.weather import WeatherClient
+
+    hosts = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        hosts.append(request.url.host)
+        return httpx.Response(
+            200,
+            json={
+                "hourly": {
+                    "temperature_2m": [12.0, 28.5],
+                    "relative_humidity_2m": [80.0, 32.0],
+                    "wind_speed_10m": [5.0, 22.4],
+                }
+            },
+        )
+
+    client = WeatherClient(
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        base_url="https://forecast.test/v1/forecast",
+        archive_url="https://archive.test/v1/archive",
+        forecast_days=30,
+    )
+    old = (date_cls.today() - timedelta(days=120)).isoformat()
+    recent = (date_cls.today() - timedelta(days=2)).isoformat()
+
+    client.get_weather(40.4168, -3.7038, date=old)
+    client.get_weather(40.4168, -3.7038, date=recent)
+
+    assert hosts == ["archive.test", "forecast.test"]
+
+
+def test_weather_client_falls_back_when_the_forecast_series_is_empty():
+    """The forecast window edge returns 200 with 24 nulls, not an error."""
+    from datetime import date as date_cls, timedelta
+
+    from firewatch.clients.weather import WeatherClient
+
+    hosts = []
+    empty = {
+        "hourly": {
+            "temperature_2m": [None] * 24,
+            "relative_humidity_2m": [None] * 24,
+            "wind_speed_10m": [None] * 24,
+        }
+    }
+    filled = {
+        "hourly": {
+            "temperature_2m": [12.0] * 24,
+            "relative_humidity_2m": [80.0] * 24,
+            "wind_speed_10m": [5.0] * 24,
+        }
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        hosts.append(request.url.host)
+        payload = empty if request.url.host == "forecast.test" else filled
+        return httpx.Response(200, json=payload)
+
+    client = WeatherClient(
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        base_url="https://forecast.test/v1/forecast",
+        archive_url="https://archive.test/v1/archive",
+        forecast_days=30,
+    )
+    # Two days old: the heuristic picks the forecast, whose series is empty.
+    recent = (date_cls.today() - timedelta(days=2)).isoformat()
+    data = client.get_weather(40.4168, -3.7038, date=recent)
+
+    assert hosts == ["forecast.test", "archive.test"]
+    assert data is not None
+    assert data["temperature_c"] == 12.0
+
+
 def test_weather_client_uses_the_requested_date():
     """A past date must query hourly data, not current conditions."""
     from firewatch.clients.weather import WeatherClient
