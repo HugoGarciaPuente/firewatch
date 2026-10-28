@@ -4,9 +4,10 @@
 # files in requirements/ so each image carries only what its tier imports; see
 # requirements/README.md.
 #
-# For local work you want everything, so this aggregates the widest tier (api),
-# which transitively includes base and processing. Keep this file as a
-# superset: `pip install -r requirements.txt` must keep working for anyone
-# running the test suite or the CLI on the host.
+# For local work this aggregates the web/ingestion/processing runtime (api),
+# which transitively includes base and processing. ML inference deps live in
+# requirements/forecast.txt; use requirements-dev.txt on the host if you need
+# to run `runner forecast` or training. Keep this file as a superset of api:
+# `pip install -r requirements.txt` must keep working for the host CLI.
 
 -r requirements/api.txt

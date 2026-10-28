@@ -15,6 +15,7 @@ from firewatch.api.auth import require_session
 from firewatch.clients.firms import FirmsClient
 from firewatch.config import resolve_regions, settings
 from firewatch.services.ingestion import create_producer, run_ingestion
+from firewatch.services.provinces import PROVINCES
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,125 @@ def list_available_dates() -> List[dict]:
             ]
     finally:
         conn.close()
+
+
+@router.get("/forecast")
+def fire_forecast(
+    date: Optional[str] = Query(
+        None,
+        description="Día objetivo AAAA-MM-DD; por defecto, el último disponible",
+    ),
+    model: Optional[str] = Query(
+        None,
+        description="Modelo (por ejemplo hgb); por defecto, el último generado",
+    ),
+) -> dict:
+    """
+    Devuelve el pronóstico provincial a 24 h almacenado en ``fire_predictions``.
+
+    La fecha objetivo por defecto es la última con pronóstico, no ``date.today()``:
+    el modelo predice el día siguiente y la tabla puede contener una fecha futura.
+    Si la tabla no existe o está vacía, devuelve 404 en vez de un 500. Las
+    coordenadas son las de la capital provincial del catálogo INE y se usan solo
+    como punto representativo del marcador del mapa.
+    """
+    target = _parse_iso_date(date, "date")
+
+    try:
+        conn = psycopg2.connect(settings.POSTGRES_DSN)
+    except psycopg2.OperationalError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database unavailable",
+        ) from exc
+
+    try:
+        with conn.cursor() as cur:
+            try:
+                if target is None:
+                    cur.execute("SELECT MAX(target_date) FROM fire_predictions")
+                    latest = cur.fetchone()
+                    if not latest or latest[0] is None:
+                        raise HTTPException(
+                            status_code=status.HTTP_404_NOT_FOUND,
+                            detail="No forecast available",
+                        )
+                    target = latest[0].isoformat()
+
+                if model is None:
+                    cur.execute(
+                        """
+                        SELECT model_name
+                        FROM fire_predictions
+                        WHERE target_date = %s
+                        ORDER BY generated_at DESC, model_name
+                        LIMIT 1
+                        """,
+                        (target,),
+                    )
+                    model_row = cur.fetchone()
+                    if model_row is None:
+                        raise HTTPException(
+                            status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"No forecast available for {target}",
+                        )
+                    model_name = model_row[0]
+                else:
+                    model_name = model
+
+                cur.execute(
+                    """
+                    SELECT province_code, province_name, probability,
+                           probability_calibrated, model_version, weather_source,
+                           generated_at
+                    FROM fire_predictions
+                    WHERE target_date = %s AND model_name = %s
+                    ORDER BY probability DESC, province_code
+                    """,
+                    (target, model_name),
+                )
+                rows = cur.fetchall()
+            except psycopg2.errors.UndefinedTable as exc:
+                # La tabla la crea `runner forecast`, no la API. En una base
+                # recién levantada todavía no existe y eso es "sin pronóstico",
+                # no un fallo del servicio.
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="No forecast available",
+                ) from exc
+    finally:
+        conn.close()
+
+    if not rows:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No forecast available for {target}",
+        )
+
+    provinces = []
+    for row in rows:
+        province = PROVINCES.get(row[0])
+        provinces.append(
+            {
+                "province_code": row[0],
+                "province_name": row[1],
+                "probability": round(float(row[2]), 4),
+                "probability_calibrated": round(float(row[3]), 4),
+                "latitude": province.latitude if province else None,
+                "longitude": province.longitude if province else None,
+            }
+        )
+
+    first = rows[0]
+    return {
+        "target_date": target,
+        "model_name": model_name,
+        "model_version": first[4],
+        "weather_source": first[5],
+        "generated_at": first[6].isoformat() if first[6] else None,
+        "count": len(provinces),
+        "provinces": provinces,
+    }
 
 
 @router.get("/stats")

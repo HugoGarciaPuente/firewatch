@@ -4,34 +4,45 @@
 
 ```
 firewatch/
-├── Dockerfile                 # One Dockerfile, 3 targets: acquisition/processing/api
+├── Dockerfile                 # One Dockerfile, 4 targets: acquisition/processing/forecast/api
 ├── .dockerignore              # Keeps .env and tests out of the image
-├── docker-compose.yml          # 5 services; each app service names its build target
+├── docker-compose.yml          # 6 services; each app service names its build target
 ├── .env.example                # Environment variables template
 ├── .gitignore                 # .env, caches, logs
 ├── pyproject.toml              # Python project config (setuptools + pytest)
 ├── requirements.txt            # Union for local installs (aggregates requirements/api.txt)
 ├── requirements/               # Per-tier dependency split, consumed by Dockerfile --target
 │   ├── README.md               # Why the split exists, and what it does NOT buy
-│   ├── base.txt                # Shared by all three tiers
+│   ├── base.txt                # Shared by all four tiers
 │   ├── acquisition.txt         # refresh  (no psycopg2, no fastapi)
 │   ├── processing.txt          # processor (no fastapi)
+│   ├── forecast.txt            # forecast worker (pandas/sklearn, no fastapi)
 │   └── api.txt                 # api (everything)
 ├── src/
 │   ├── firewatch/              # Main Python package
 │   │   ├── __init__.py
 │   │   ├── config.py           # Settings: env vars + REGION_BBOXES
-│   │   ├── runner.py           # CLI: ingest / backfill / daily / process / geocode-backfill / purge-out-of-scope
+│   │   ├── runner.py           # CLI: ingest / backfill / daily / process / panel / forecast / ...
 │   │   ├── clients/            # External API clients (all outbound calls here)
 │   │   │   ├── __init__.py
 │   │   │   ├── firms.py        # NASA FIRMS API client
 │   │   │   ├── weather.py      # Open-Meteo hourly series, cached per (0.25° cell, date)
+│   │   │   ├── daily_weather.py # Open-Meteo daily archive + forecast for provinces
 │   │   │   └── geocode.py      # Nominatim reverse geocoding, cached per exact point
 │   │   ├── services/           # Business services
 │   │   │   ├── __init__.py
 │   │   │   ├── ingestion.py    # Kafka producer ingestion
 │   │   │   ├── processing.py   # Kafka consumer -> PostGIS writer
-│   │   │   └── risk.py         # Risk scoring (Phase 2)
+│   │   │   ├── risk.py         # Risk scoring (Phase 2)
+│   │   │   ├── provinces.py    # INE province catalogue and aliases
+│   │   │   ├── panel.py        # Province-day panel for the ML model
+│   │   │   └── forecast.py     # fire_predictions table + idempotent upsert
+│   │   ├── ml/                 # ML pipeline (training dev-only; inference forecast tier)
+│   │   │   ├── __init__.py
+│   │   │   ├── features.py     # Lagged weather, seasonality, leakage guards
+│   │   │   ├── metrics.py      # PR-AUC, Brier, ECE, precision@k, lift
+│   │   │   ├── forecast.py     # Inference frame, artifact guard, raw/calibrated scores
+│   │   │   └── train.py        # Temporal split, climatology/logistic/HGB
 │   │   ├── api/                # FastAPI application
 │   │   │   ├── __init__.py
 │   │   │   ├── auth.py         # API key + signed session cookie
@@ -42,18 +53,32 @@ firewatch/
 │   │   ├── static/             # Dashboard assets (session-guarded)
 │   │   │   ├── index.html
 │   │   │   ├── stats.html      # Statistics section (session-guarded)
+│   │   │   ├── forecast.html   # Provincial forecast map (session-guarded)
+│   │   │   ├── sources.html    # Sources, APIs and methodology (session-guarded)
 │   │   │   ├── login.html      # Self-contained: cannot load /static
 │   │   │   ├── app.js
 │   │   │   ├── stats.js
+│   │   │   ├── forecast.js
+│   │   │   ├── data/spain-provinces.geojson  # 52 INE province boundaries
 │   │   │   └── style.css
 │   │   └── tests/              # Test suite (mocked, no live calls)
 │   │       ├── __init__.py
 │   │       ├── conftest.py
 │   │       ├── test_clients.py
 │   │       ├── test_config.py
+│   │       ├── test_daily_weather.py
+│   │       ├── test_effis.py
+│   │       ├── test_forecast_service.py
 │   │       ├── test_geocode.py
 │   │       ├── test_ingestion.py
+│   │       ├── test_labels.py
+│   │       ├── test_ml_features.py
+│   │       ├── test_ml_forecast.py
+│   │       ├── test_ml_metrics.py
+│   │       ├── test_ml_train.py
+│   │       ├── test_panel.py
 │   │       ├── test_processing.py
+│   │       ├── test_provinces.py
 │   │       ├── test_ratelimit.py
 │   │       ├── test_regions.py
 │   │       ├── test_risk.py
@@ -86,18 +111,28 @@ the country allowlist.
 
 ## Available Commands
 
-- `docker compose up -d --build` - **Start everything** (api, processor, refresh, postgres, kafka)
-- `docker compose build api` - Rebuild one tier only (target: api/processing/acquisition)
+- `docker compose up -d --build` - **Start everything** (api, processor, forecast, refresh, postgres, kafka)
+- `docker compose build api` - Rebuild one tier only (target: api/processing/forecast/acquisition)
 - `docker compose logs -f refresh` - Watch the FIRMS refresh loop
-- `docker compose ps` - Confirm the five services are up (only `api`, `postgres` and `kafka` expose a healthcheck)
+- `docker compose logs -f forecast` - Watch the 3 h forecast worker
+- `docker compose ps` - Confirm the six services are up (only `api`, `postgres` and `kafka` expose a healthcheck)
 - `pip install -e .` or `pip install -r requirements-dev.txt` - Local dev setup
-- `pytest` - Run tests (147 tests, no live services required)
+- `python -m pytest` - Run tests (243 tests, no live services required)
+- `python -m ruff check src` - Static checks
 - `python -m firewatch.runner ingest` - One-shot FIRMS fetch -> Kafka
 - `python -m firewatch.runner backfill --start-date D --end-date D` - Historical load (one request per day)
-- `python -m firewatch.runner daily --days 3` - Loop that keeps data fresh
+- `python -m firewatch.runner daily --days 3 --interval-minutes 30` - Loop that keeps data fresh
 - `python -m firewatch.runner process` - Consumer -> PostGIS (continuous)
 - `python -m firewatch.runner geocode-backfill --limit N` - Fill in missing localities (rate-limited)
 - `python -m firewatch.runner purge-out-of-scope [--dry-run]` - Delete stored points whose geocoded country is outside `FIREWATCH_COUNTRY_CODES` (idempotent)
+- `python -m firewatch.runner labels --min-area-ha 1` - Import EFFIS confirmed fires (needs `psycopg2`)
+- `python -m firewatch.runner map-provinces` - Fill `confirmed_fires.province_code` from the INE catalogue
+- `python -m firewatch.runner panel --start-date D --end-date D --min-area-ha 10 --output data/panel_province_day.csv` - Build the province-day panel (needs Postgres)
+- `python -m firewatch.runner province-weather --start-date D --end-date D --output data/weather_province_day.csv --sleep 2` - Download daily weather for every province
+- `python -m firewatch.ml.train` - Train and evaluate the 24 h baseline (offline; pandas/scikit-learn)
+- `python -m firewatch.runner forecast --dry-run` - Predict the next UTC day for the 52 provinces without writing
+- `python -m firewatch.runner forecast` - Same, but upsert into `fire_predictions` (needs Postgres; dev deps for sklearn)
+- `python -m firewatch.runner forecast --loop --interval-minutes 180` - Worker loop; this is what the `forecast` Compose service runs
 
 ## Gotchas
 
@@ -114,8 +149,10 @@ the country allowlist.
   `COALESCE(EXCLUDED.locality, fire_events.locality)`, because FIRMS reissues
   recent days and a Nominatim outage must not blank every name in the database.
 - **`locality = '{}'` means "tried, no locality found"** (open sea). It is not
-  the same as NULL, which means "not attempted yet". `--recheck` retries the
-  former.
+  the same as NULL, which means "not attempted yet" or "the lookup failed".
+  `get_location_checked` raises `GeocodeError` on HTTP/parse failures;
+  `geocode-backfill` leaves those rows NULL and exits 1 instead of writing `{}`.
+  `--recheck` retries only the rows already marked `{}`.
 - **`locality.province` is the province, not the autonomous community.**
   Nominatim puts the community in `address.state` (Extremadura) and the
   province in `address.province`/`state_district` (Cáceres); `locality.community`
@@ -163,15 +200,27 @@ the country allowlist.
   the consumer mid-batch; a large backfill would rebalance and reprocess. 25
   keeps the batch under the 5-minute poll interval, and `test_processing` pins
   the arithmetic instead of the number alone.
+- **Kafka offsets are committed after PostgreSQL, not on poll.**
+  `create_consumer` sets `enable_auto_commit=False`; `_commit_message` commits
+  the exact `offset + 1` only after `upsert_record` has committed. Invalid and
+  out-of-scope records are classified and committed; DB connection errors are
+  retried with a fresh connection, and an unrecoverable one stops the consumer.
+  Do not re-enable auto-commit: it can acknowledge messages that never reached
+  Postgres.
+- **The processor must reconnect after a PostgreSQL restart.** `_reconnect_database`
+  retries with 1 s, 2 s and 5 s backoff, recreates the schema with `_ensure_table`
+  and retries the same Kafka message. If all attempts fail, `DatabaseUnavailable`
+  propagates so Compose restarts the processor; do not swallow it and continue.
 - **Adding an import can break a container, not just the code.**
   `requirements/` is split per tier, so a new third-party import in
   `services/` means only the tiers that reach it get the package. The image
   still builds; it dies at startup instead. `test_tiers.py` walks the real
   import graph and names the file to fix. Run it after touching imports.
-- **The tiers share more dependencies than the structure suggests.** All three
+- **The tiers share more dependencies than the structure suggests.** All four
   need `httpx` and `kafka-python`: `services/processing.py` reaches
-  `clients/weather.py` via the risk scorer, and `api/endpoints.py` reaches
-  `services/ingestion.py`. Only the web stack and `psycopg2` are separable.
+  `clients/weather.py` via the risk scorer, `api/endpoints.py` reaches
+  `services/ingestion.py`, and `runner.py` imports `services.processing` at
+  module level. Only the web stack, `psycopg2` and the ML stack are separable.
 - **A missing `build.target` in compose fails silently.** The Dockerfile's last
   stage becomes the default image, so a typo builds the wrong tier without
   error. `test_tiers.py::test_compose_build_targets_are_explicit` guards it.
@@ -179,8 +228,14 @@ the country allowlist.
   Postgres volume. The ingested events in `fire_events` live there and nowhere
   else; losing the volume means re-running the backfill.
 - **Static assets are cache-busted with `?v=N`.** After editing `app.js` or
-  `style.css`, bump `N` in `static/index.html`, otherwise the browser keeps
-  serving the cached copy and the change appears to have no effect.
+  `style.css`, bump `N` in every HTML page that links the asset
+  (`static/index.html`, `stats.html`, `forecast.html`, `sources.html`), otherwise
+  the browser keeps serving the cached copy and the change appears to have no
+  effect.
+- **The dashboard has no manual ingest UI.** `POST /api/v1/fire/ingest` remains
+  for automation, but the "Nueva Ingesta" button, modal and submit handler were
+  removed deliberately. Do not reintroduce a browser path that launches FIRMS
+  ingests; ingest is the `refresh` service or the CLI.
 - **FIRMS serves one day per request.** No date ranges. `backfill` iterates
   day by day; this is inherent to the API, not a bug.
 - **FIRMS reissues recent days** as the product matures. `runner daily`
@@ -203,6 +258,14 @@ the country allowlist.
   polygons to "show the affected area": a convex hull over distant points
   represents no real zone, and an arbitrary buffer is invented geometry. An
   earlier implementation was removed for exactly this reason.
+- **`confirmed_fires` is not `fire_events`.** FIRMS detections are not
+  confirmed fires; `runner labels` downloads EFFIS burnt areas into a separate
+  table for the 24 h model. EFFIS ignores date filters, so the command pages
+  the whole Spanish catalogue (~12.7k records, ~15 s per 250) and filters
+  locally; `--limit` is the pilot shortcut. It needs `psycopg2`, so run it in
+  `processor`/`api`, not in the acquisition image. `municipality_code` (INE)
+  is filled later and the upsert uses `COALESCE`, so a re-import cannot erase
+  it.
 - **`peninsula` and `baleares` bboxes overlap** (Menorca 1.2°E, mainland
   3.3°E). Scope filtering uses the union; per-region counts need priority
   assignment.
@@ -213,8 +276,16 @@ the country allowlist.
 - **A refresh loop only counts once it is actually running.** Implementing
   `runner daily` makes nothing automatic by itself — that is a silent
   failure mode where the code looks right and nothing runs. The refresh is the
-  `refresh` Compose service; check `docker compose ps` and
+  `refresh` Compose service; it polls every 30 min
+  (`REFRESH_INTERVAL_MINUTES`). Check `docker compose ps` and
   `docker compose logs refresh`.
+- **A forecast loop only counts once it is running.** The `forecast` Compose
+  service runs `runner forecast --loop`; if it is down, the model artifact is
+  missing, or the loop dies, `/forecast` keeps serving the previous target date.
+  Check `docker compose ps` and `docker compose logs forecast`. The default
+  cadence is 3 h (`FORECAST_INTERVAL_MINUTES`), while `refresh` polls FIRMS every
+  30 min (`REFRESH_INTERVAL_MINUTES`). The forecast does not depend on FIRMS: it
+  uses Open-Meteo history and forecast, and 3 h matches the regional model runs.
 - **Never let the refresh report partial success.** `refresh_once()` returns 1
   if any region/day failed after retries. Do not "helpfully" swallow that:
   a silent partial refresh freezes the dataset unnoticed.
@@ -264,3 +335,94 @@ the country allowlist.
 - **`/static/index.html` must never be publicly reachable.** Serving the
   dashboard shell without auth reduces the gate to a client-side JS redirect,
   which anyone bypasses by disabling JavaScript.
+- **The ML dependencies live in the forecast tier, not in the web or ingestion
+  tiers.** `requirements/forecast.txt` installs `pandas` and `scikit-learn` for
+  the `forecast` worker; `pyproject.toml` keeps them under `dev` for host
+  training. `firewatch.ml` is imported by the forecast worker through
+  `runner forecast`, never at module level by the API, processor or acquisition
+  entry points. If you import it from those at top level, the image still builds
+  and then dies at startup; `test_tiers.py` walks the real graph. The worker
+  reads the joblib artifact from the read-only `./data/models` mount, so a
+  re-train changes the model on the next loop without rebuilding the image.
+- **The ML split is temporal: 2017-2024 train, 2025 validation, 2026 test.**
+  Do not replace it with `train_test_split(random_state=...)`: a fire from the
+  same province and week would land on both sides and inflate every metric.
+  Hyperparameters and isotonic calibration are fitted on 2025 only; 2026 is
+  read once for the final report.
+- **Day-D weather is a reanalysis proxy for a forecast, not an archived
+  forecast.** `tmax_c`, `rh_min`, `wind_max_kmh` and `precip_mm` are ERA5
+  values for the target day. The 24 h model assumes the day-D forecast is
+  available on D-1; the historical score is optimistic if the real forecast is
+  worse. The antecedent features (`days_since_rain`, `precip_sum_7`, the lags)
+  use only days before D, and `precip_sum_7` must never include D's rain.
+- **`year` is not a feature.** It is kept for the split and the per-year
+  report. As a feature it would ask the model to extrapolate to 2026, a value
+  it never saw in training.
+- **Raw HGB ranks better than calibrated HGB; calibrated probabilities are
+  better calibrated.** Isotonic regression creates ties and lowers PR-AUC
+  (0.244 vs 0.267 in the reference run) while cutting ECE (0.0069 vs 0.0144).
+  Report both and pick per use case; do not silently replace the ranking score
+  with the calibrated one. `runner forecast` stores both in `fire_predictions`:
+  `probability` is the raw score, `probability_calibrated` the isotonic one.
+- **`runner forecast` needs 35 days of history, not 14.** `days_since_rain`
+  saturates at 30 in training; with a shorter window the target day gets a
+  truncated dry spell and the model sees a different feature distribution.
+  `build_forecast_frame` rejects fewer than 31 days, and the CLI defaults to 35.
+  Do not lower `--history-days` to "make it faster": it is one archive request
+  per province regardless of the range.
+- **The target day is always requested from the forecast API, never ERA5.**
+  `DailyWeatherClient.fetch_forecast` exists for exactly this. `fetch_daily`
+  may fall back to the forecast for the recent history tail, but mixing the
+  target day with archive data would silently use a different variable than the
+  one the model is predicting with. If the forecast has no row for the target,
+  the province fails.
+- **The forecast is all-or-nothing.** `runner forecast` computes all requested
+  provinces first and writes them in one transaction. If one province is
+  missing a day, a variable is NULL, or the forecast is absent, it exits 1 and
+  writes nothing; the previous `fire_predictions` rows stay. Do not "helpfully"
+  write the 51 that worked: a partial map looks complete and is worse than a
+  failed run. `--dry-run` is the safe way to inspect coverage.
+- **`fire_predictions` is derived and regenerable.** It is not a second copy of
+  `fire_events` or `confirmed_fires`; losing the Postgres volume only means
+  re-running `runner forecast`. The table is created by the job, not by the API,
+  and the upsert key is `(target_date, province_code, model_name)`. Re-running
+  the same day replaces rows and `generated_at`.
+- **The forecast API defaults to the latest `target_date`, not today.**
+  `GET /api/v1/fire/forecast` returns 404 when `fire_predictions` is empty or the
+  table does not exist yet, because `runner forecast` creates it. The target day
+  is usually tomorrow UTC and has no `fire_events` rows. It exposes both
+  `probability` (raw, used for ranking) and `probability_calibrated` (shown as
+  the probability); do not silently replace one with the other.
+- **The forecast is a separate page, not a dashboard panel or layer.** `/forecast`
+  serves `forecast.html` + `forecast.js` and fetches
+  `/static/data/spain-provinces.geojson` plus `/api/v1/fire/forecast`. The
+  dashboard only links to it. The province polygons are administrative
+  boundaries for coloring the probability; they are not fire perimeters and must
+  not be described as affected area. The GeoJSON is committed (unlike `data/`),
+  uses the same INE `province_code` as `PROVINCES`, and `test_provinces.py` pins
+  all 52 features. The map uses calibrated probability; the list is ranked by raw
+  score.
+- **`/sources` is a citation page, not another dashboard.** It serves
+  `sources.html` and has no data calls; the only script is the inline logout
+  handler. It must stay linked from every protected shell (`index.html`,
+  `stats.html`, `forecast.html`) and behind `require_session`, like the other
+  pages. The page is the place to update API names, licences and the short
+  explanations of the heuristic risk score and the ML forecast; do not duplicate
+  those claims in the dashboard.
+- **`/data/` is gitignored and regenerable.** The panel (186k rows), the weather
+  CSV and the `.joblib` artifacts do not belong in the repository. Rebuild them
+  with `runner panel`, `runner province-weather` and `python -m
+  firewatch.ml.train`. `reports/forecast_baseline.*` is the committed summary.
+- **Open-Meteo rate-limits the province weather download.** `province-weather`
+  sends one request per province for the full 2017-2026 range. A 429 burst can
+  survive 15/30/45 s backoffs; use `--sleep 2` and, if a province still fails,
+  fetch it alone later. Do not lower the sleep to "finish faster": the retry
+  budget is shared by every province in the run.
+- **The panel requires Postgres; the weather download does not.** `runner
+  panel` reads `confirmed_fires` and writes a CSV, so run it where
+  `POSTGRES_DSN` is reachable. `runner province-weather` only calls Open-Meteo
+  and can run on the host. Neither is part of a container startup path.
+- **A report with a new feature or hyperparameter is not the old report.**
+  Re-run `python -m firewatch.ml.train` after changing `features.py` or the HGB
+  parameters; the Markdown is generated, not hand-edited. Check the validation
+  PR-AUC before looking at 2026, or you will tune on the test year.

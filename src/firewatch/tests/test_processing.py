@@ -1,6 +1,7 @@
 """Tests for the processing service (no Kafka/Postgres required)."""
 
 import pytest
+from kafka.structs import OffsetAndMetadata, TopicPartition
 
 from firewatch.config import resolve_regions, settings
 from firewatch.services.processing import (
@@ -81,8 +82,11 @@ class FakeConn:
 
 
 class FakeMessage:
-    def __init__(self, value):
+    def __init__(self, value, topic="firms-ingest", partition=0, offset=0):
         self._value = value
+        self.topic = topic
+        self.partition = partition
+        self.offset = offset
 
     def error(self):
         return None
@@ -107,11 +111,15 @@ class FakeConsumer:
     def __init__(self, batches):
         # batches: list of {("topic", 0): [messages]} returned per poll
         self._batches = list(batches)
+        self.commits = []
 
     def poll(self, timeout_ms=None):
         if self._batches:
             return self._batches.pop(0)
         return {}
+
+    def commit(self, offsets=None):
+        self.commits.append(offsets)
 
 
 def test_consume_and_process_upserts_message(firms_sample):
@@ -137,6 +145,114 @@ def test_consume_and_process_upserts_message(firms_sample):
     assert "ON CONFLICT (acq_date, latitude, longitude) DO UPDATE" in upsert_sql
     assert "ST_MakePoint" in upsert_sql  # PostGIS geometry is populated
     assert conn.commits >= 1
+
+
+def test_consumer_commits_exactly_the_persisted_message_offset(firms_sample):
+    conn = FakeConn()
+    consumer = FakeConsumer(
+        [
+            {
+                ("firms-ingest", 0): [
+                    FakeMessage(firms_sample[0], offset=41),
+                ]
+            }
+        ]
+    )
+
+    processed = consume_and_process(
+        consumer=consumer,
+        conn=conn,
+        batch_limit=1,
+        weather_client=StubWeather(),
+        geocode_client=StubGeocode(),
+    )
+
+    assert processed == 1
+    assert consumer.commits == [
+        {
+            TopicPartition("firms-ingest", 0): OffsetAndMetadata(42, ""),
+        }
+    ]
+
+
+def test_consumer_commits_invalid_message_offsets():
+    """A poison record must not be replayed forever after it is classified as invalid."""
+    conn = FakeConn()
+    consumer = FakeConsumer(
+        [
+            {
+                ("firms-ingest", 0): [
+                    FakeMessage({"brightness": 300.0}, offset=7),
+                ]
+            }
+        ]
+    )
+
+    processed = consume_and_process(
+        consumer=consumer,
+        conn=conn,
+        batch_limit=1,
+        max_empty_polls=1,
+        weather_client=StubWeather(),
+        geocode_client=StubGeocode(),
+    )
+
+    assert processed == 0
+    assert consumer.commits == [
+        {
+            TopicPartition("firms-ingest", 0): OffsetAndMetadata(8, ""),
+        }
+    ]
+
+
+def test_consumer_reconnects_and_retries_the_same_message(monkeypatch):
+    """A Postgres restart must not skip the in-flight record."""
+    import psycopg2
+
+    import firewatch.services.processing as processing
+
+    initial = FakeConn()
+    replacement = FakeConn()
+    monkeypatch.setattr(processing, "_connect_db", lambda: initial)
+    reconnects = []
+
+    def fake_reconnect(old):
+        reconnects.append(old)
+        return replacement
+
+    monkeypatch.setattr(processing, "_reconnect_database", fake_reconnect)
+    calls = []
+
+    def fake_upsert(conn, record, weather=None, location=None):
+        calls.append(conn)
+        if len(calls) == 1:
+            raise psycopg2.OperationalError("connection lost")
+        return {"risk_level": "low", "score": 0.0, "factors": {}}
+
+    monkeypatch.setattr(processing, "upsert_record", fake_upsert)
+
+    message = FakeMessage(
+        {"acq_date": "2026-10-08", "latitude": 40.0, "longitude": -3.0},
+        offset=11,
+    )
+    consumer = FakeConsumer([{("firms-ingest", 0): [message]}])
+
+    processed = consume_and_process(
+        consumer=consumer,
+        conn=None,
+        batch_limit=1,
+        weather_client=StubWeather(),
+        geocode_client=StubGeocode(),
+    )
+
+    assert processed == 1
+    assert reconnects == [initial]
+    assert calls == [initial, replacement]
+    assert consumer.commits == [
+        {
+            TopicPartition("firms-ingest", 0): OffsetAndMetadata(12, ""),
+        }
+    ]
 
 
 def test_consume_and_process_accepts_bytes_payload(firms_sample):
@@ -520,5 +636,6 @@ def test_consumer_batches_fit_inside_the_poll_interval(monkeypatch):
     monkeypatch.setattr(processing, "KafkaConsumer", FakeKafkaConsumer)
     processing.create_consumer()
 
+    assert captured["enable_auto_commit"] is False
     batch_seconds = captured["max_poll_records"] * settings.GEOCODE_MIN_INTERVAL
     assert batch_seconds < captured["max_poll_interval_ms"] / 1000

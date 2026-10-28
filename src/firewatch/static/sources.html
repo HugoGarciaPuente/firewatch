@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🔥 FireWatch — Fuentes y método</title>
+
+  <!-- Google Fonts: Inter + JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/static/style.css?v=17">
+</head>
+<body>
+  <div class="app-container">
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-icon">🔥</span>
+        <div>
+          <h1 class="brand-title">FireWatch <span class="badge badge-phase">Fuentes y método</span></h1>
+          <p class="brand-subtitle">APIs, datos y lógica del sistema</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <a href="/dashboard" class="btn btn-secondary" title="Volver al mapa de focos">
+          <span class="icon">🗺️</span> Mapa
+        </a>
+        <a href="/stats" class="btn btn-secondary" title="Ver estadísticas por provincia y municipio">
+          <span class="icon">📊</span> Estadísticas
+        </a>
+        <a href="/forecast" class="btn btn-secondary" title="Mapa de probabilidad provincial a 24 h">
+          <span class="icon">📈</span> Pronóstico
+        </a>
+        <button id="btn-logout" class="btn btn-secondary" title="Cerrar sesión">
+          <span class="icon">⎋</span> Salir
+        </button>
+      </div>
+    </header>
+
+    <main class="sources-main">
+      <section class="sources-hero">
+        <div class="sources-hero-copy">
+          <p class="sources-eyebrow">Transparencia del dato</p>
+          <h2>De dónde salen los datos y cómo se convierten en riesgo</h2>
+          <p class="sources-lede">
+            FireWatch combina detecciones satelitales, meteorología, geocodificación y un
+            modelo de aprendizaje automático. Ninguna capa se presenta como perímetro de
+            incendio ni como alerta oficial.
+          </p>
+        </div>
+        <div class="sources-chip-row" aria-label="Fuentes principales">
+          <span class="source-chip">🛰️ NASA FIRMS</span>
+          <span class="source-chip">🔥 EFFIS</span>
+          <span class="source-chip">🌤️ Open-Meteo</span>
+          <span class="source-chip">📍 Nominatim</span>
+          <span class="source-chip">🗺️ INE</span>
+        </div>
+      </section>
+
+      <section class="sources-section" aria-labelledby="sources-data-title">
+        <div class="sources-section-head">
+          <h2 id="sources-data-title">APIs y datos utilizados</h2>
+          <p>Las fuentes externas que alimentan la ingesta, las etiquetas y el mapa.</p>
+        </div>
+
+        <div class="sources-grid">
+          <article class="source-card">
+            <div class="source-card-head">
+              <span class="source-icon" aria-hidden="true">🛰️</span>
+              <div>
+                <h3>NASA FIRMS</h3>
+                <span class="source-role">Detección de focos</span>
+              </div>
+            </div>
+            <p>
+              Anomalías térmicas de los satélites VIIRS (SNPP y, cuando hace falta,
+              NOAA-20/21). Cada registro es un centro de píxel con fecha y hora UTC,
+              coordenadas, brillo y confianza. La ingesta consulta FIRMS por región y
+              día, y refresca la ventana reciente cada 30 minutos.
+            </p>
+            <dl class="source-meta">
+              <div>
+                <dt>API</dt>
+                <dd><a href="https://firms.modaps.eosdis.nasa.gov/api/" target="_blank" rel="noopener">firms.modaps.eosdis.nasa.gov/api</a></dd>
+              </div>
+              <div>
+                <dt>Datos</dt>
+                <dd>VIIRS SNPP NRT/SP · puntos, no perímetros</dd>
+              </div>
+              <div>
+                <dt>Crédito</dt>
+                <dd>NASA FIRMS / LANCE</dd>
+              </div>
+            </dl>
+          </article>
+
+          <article class="source-card">
+            <div class="source-card-head">
+              <span class="source-icon" aria-hidden="true">🔥</span>
+              <div>
+                <h3>EFFIS · Copernicus EMS</h3>
+                <span class="source-role">Etiquetas de incendios confirmados</span>
+              </div>
+            </div>
+            <p>
+              Perímetros de área quemada de incendios confirmados. Se usan como
+              etiquetas del modelo: un día y una provincia son positivos si contienen
+              al menos un incendio confirmado de 10 ha o más. No se muestran como
+              focos en el dashboard.
+            </p>
+            <dl class="source-meta">
+              <div>
+                <dt>API</dt>
+                <dd><a href="https://api.effis.emergency.copernicus.eu/rest/2/burntareas/current" target="_blank" rel="noopener">api.effis.emergency.copernicus.eu</a></dd>
+              </div>
+              <div>
+                <dt>Datos</dt>
+                <dd>Áreas quemadas · etiqueta binaria ≥10 ha</dd>
+              </div>
+              <div>
+                <dt>Crédito</dt>
+                <dd>EFFIS / Copernicus Emergency Management Service</dd>
+              </div>
+            </dl>
+          </article>
+
+          <article class="source-card">
+            <div class="source-card-head">
+              <span class="source-icon" aria-hidden="true">🌤️</span>
+              <div>
+                <h3>Open-Meteo</h3>
+                <span class="source-role">Meteorología histórica y previsión</span>
+              </div>
+            </div>
+            <p>
+              Temperatura máxima y mínima, humedad relativa mínima, viento máximo y
+              precipitación diaria por capital de provincia. El histórico sale de ERA5
+              (Archive API); el día objetivo, de Forecast API. Para puntuar un foco se
+              piden las variables horarias del día y de la hora del sobrevuelo.
+            </p>
+            <dl class="source-meta">
+              <div>
+                <dt>Archive</dt>
+                <dd><a href="https://archive-api.open-meteo.com/v1/archive" target="_blank" rel="noopener">archive-api.open-meteo.com</a></dd>
+              </div>
+              <div>
+                <dt>Forecast</dt>
+                <dd><a href="https://api.open-meteo.com/v1/forecast" target="_blank" rel="noopener">api.open-meteo.com</a></dd>
+              </div>
+              <div>
+                <dt>Datos</dt>
+                <dd>ERA5 · previsión diaria/horaria</dd>
+              </div>
+            </dl>
+          </article>
+
+          <article class="source-card">
+            <div class="source-card-head">
+              <span class="source-icon" aria-hidden="true">📍</span>
+              <div>
+                <h3>Nominatim · OpenStreetMap</h3>
+                <span class="source-role">Geocodificación inversa</span>
+              </div>
+            </div>
+            <p>
+              Convierte cada punto FIRMS en localidad, provincia y país. La ingesta
+              respeta un máximo de una petición por segundo y guarda el resultado para
+              no repetir consultas. Sin este paso no se puede aplicar el filtro de país
+              ni agrupar las estadísticas por provincia.
+            </p>
+            <dl class="source-meta">
+              <div>
+                <dt>API</dt>
+                <dd><a href="https://nominatim.openstreetmap.org" target="_blank" rel="noopener">nominatim.openstreetmap.org</a></dd>
+              </div>
+              <div>
+                <dt>Datos</dt>
+                <dd>Direcciones y divisiones administrativas</dd>
+              </div>
+              <div>
+                <dt>Licencia</dt>
+                <dd>© OpenStreetMap contributors · ODbL</dd>
+              </div>
+            </dl>
+          </article>
+
+          <article class="source-card">
+            <div class="source-card-head">
+              <span class="source-icon" aria-hidden="true">🗺️</span>
+              <div>
+                <h3>INE · límites provinciales</h3>
+                <span class="source-role">Unidad territorial del pronóstico</span>
+              </div>
+            </div>
+            <p>
+              Los códigos de provincia del INE identifican las 52 unidades del modelo.
+              Los polígonos que colorean el mapa de pronóstico son límites
+              administrativos, no perímetros de incendio, y proceden del GeoJSON de
+              click_that_hood (MIT).
+            </p>
+            <dl class="source-meta">
+              <div>
+                <dt>Códigos</dt>
+                <dd><a href="https://www.ine.es/" target="_blank" rel="noopener">INE</a></dd>
+              </div>
+              <div>
+                <dt>Geometría</dt>
+                <dd><a href="https://github.com/codeforgermany/click_that_hood" target="_blank" rel="noopener">click_that_hood</a> · MIT</dd>
+              </div>
+              <div>
+                <dt>Uso</dt>
+                <dd>52 provincias · Península, Baleares y Canarias</dd>
+              </div>
+            </dl>
+          </article>
+
+          <article class="source-card">
+            <div class="source-card-head">
+              <span class="source-icon" aria-hidden="true">🧭</span>
+              <div>
+                <h3>Cartografía y librerías</h3>
+                <span class="source-role">Visualización del mapa</span>
+              </div>
+            </div>
+            <p>
+              Leaflet dibuja los mapas; Leaflet.heat y Leaflet.markercluster añaden
+              la densidad y la agrupación de focos. Las teselas base son de Stadia Maps
+              sobre OpenMapTiles y OpenStreetMap.
+            </p>
+            <dl class="source-meta">
+              <div>
+                <dt>Mapas</dt>
+                <dd><a href="https://leafletjs.com/" target="_blank" rel="noopener">Leaflet 1.9.4</a></dd>
+              </div>
+              <div>
+                <dt>Teselas</dt>
+                <dd><a href="https://stadiamaps.com/" target="_blank" rel="noopener">Stadia Maps</a> · <a href="https://openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a></dd>
+              </div>
+              <div>
+                <dt>Base</dt>
+                <dd>© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a></dd>
+              </div>
+            </dl>
+          </article>
+        </div>
+      </section>
+
+      <section class="sources-section" aria-labelledby="sources-method-title">
+        <div class="sources-section-head">
+          <h2 id="sources-method-title">Cómo se calcula</h2>
+          <p>Dos capas distintas: el riesgo de un foco ya detectado y el pronóstico de nuevos incendios.</p>
+        </div>
+
+        <div class="method-grid">
+          <article class="method-card">
+            <div class="method-card-head">
+              <span class="method-index">01</span>
+              <h3>Riesgo de un foco FIRMS</h3>
+            </div>
+            <p>
+              Es un índice heurístico por detección, no el modelo de pronóstico.
+              Combina tres señales cuando hay meteorología disponible:
+            </p>
+            <div class="method-formula">score = 0.45·brillo + 0.35·sequedad + 0.20·viento</div>
+            <ul class="clean-list">
+              <li><strong>Brillo:</strong> temperatura de la anomalía normalizada entre 300 K (0) y 400 K (1).</li>
+              <li><strong>Sequedad:</strong> humedad de equilibrio del combustible (Simard) a partir de temperatura y humedad relativa.</li>
+              <li><strong>Viento:</strong> velocidad a 10 m normalizada entre 0 y 60 km/h.</li>
+            </ul>
+            <div class="risk-thresholds" aria-label="Umbrales de riesgo">
+              <span class="risk-pill risk-low">Bajo &lt; 0,25</span>
+              <span class="risk-pill risk-moderate">Moderado 0,25–0,49</span>
+              <span class="risk-pill risk-high">Alto 0,50–0,74</span>
+              <span class="risk-pill risk-extreme">Extremo ≥ 0,75</span>
+            </div>
+            <p class="method-note">
+              Si falta la meteorología, el score cae al brillo normalizado. El resultado
+              se guarda como <code>risk_level</code> y <code>risk_score</code>, y colorea
+              los puntos del dashboard.
+            </p>
+          </article>
+
+          <article class="method-card">
+            <div class="method-card-head">
+              <span class="method-index">02</span>
+              <h3>Pronóstico ML a 24 h</h3>
+            </div>
+            <p>
+              El mapa de <a href="/forecast">/forecast</a> responde a otra pregunta:
+              ¿qué probabilidad hay de que mañana, en el día UTC, se confirme al menos
+              un incendio de 10 ha o más en cada provincia? No usa el score heurístico
+              como entrada.
+            </p>
+            <ul class="clean-list">
+              <li><strong>Unidad:</strong> provincia-día; 52 provincias INE; positivo si hay al menos un incendio EFFIS ≥10 ha.</li>
+              <li><strong>Entrenamiento:</strong> panel 2017–2024; validación 2025; test 2026 intacto. Modelo HistGradientBoosting.</li>
+              <li><strong>Features:</strong> meteorología del día objetivo, estacionalidad, coordenadas, lags de temperatura de 1–3 días, agregados de 7 días y días sin lluvia. <code>year</code> no se usa.</li>
+              <li><strong>Salida:</strong> score crudo para el ranking y probabilidad calibrada (isotonic) para el mapa. Se escribe en <code>fire_predictions</code>; el worker se recalcula cada 3 h con Open-Meteo.</li>
+            </ul>
+            <p class="method-note">
+              El día objetivo se pide siempre a la API de previsión, nunca a ERA5. Una
+              probabilidad del 10% no significa “10% de área”: es la probabilidad
+              estimada de que exista al menos un incendio confirmado ≥10 ha en esa
+              provincia y día.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section class="sources-section" aria-labelledby="sources-scope-title">
+        <div class="sources-section-head">
+          <h2 id="sources-scope-title">Alcance y limitaciones</h2>
+        </div>
+        <div class="scope-grid">
+          <div class="scope-item">
+            <strong>Puntos, no perímetros</strong>
+            <p>
+              FIRMS entrega centros de píxel, no el contorno del incendio. Los polígonos
+              del pronóstico son límites provinciales administrativos: no representan
+              área afectada.
+            </p>
+          </div>
+          <div class="scope-item">
+            <strong>Probabilidad, no certeza</strong>
+            <p>
+              El modelo estima riesgo estadístico a partir de datos históricos y
+              meteorología prevista. Un valor alto no garantiza un incendio, y uno bajo
+              no lo descarta.
+            </p>
+          </div>
+          <div class="scope-item">
+            <strong>No es una alerta oficial</strong>
+            <p>
+              FireWatch es un proyecto académico. Ante una emergencia, consulta siempre
+              los servicios oficiales de protección civil y emergencias.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <footer class="sources-footer">
+        <p>
+          Atribuciones: NASA FIRMS/LANCE; EFFIS / Copernicus Emergency Management
+          Service; Open-Meteo; © OpenStreetMap contributors (ODbL); INE; límites de
+          <a href="https://github.com/codeforgermany/click_that_hood" target="_blank" rel="noopener">click_that_hood</a>
+          (MIT); teselas de Stadia Maps y OpenMapTiles.
+        </p>
+        <p>
+          FireWatch puede contener errores, retrasos o huecos de cobertura. No sustituye
+          a los sistemas oficiales de alerta.
+        </p>
+      </footer>
+    </main>
+  </div>
+
+  <script>
+    document.getElementById('btn-logout')?.addEventListener('click', async () => {
+      await fetch('/auth/logout', { method: 'POST' });
+      window.location.assign('/login');
+    });
+  </script>
+</body>
+</html>

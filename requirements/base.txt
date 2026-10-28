@@ -1,18 +1,18 @@
 # Dependencies shared by every tier.
 #
-# This is the ONLY file all three targets install. It exists to make the
-# shared base explicit rather than duplicated three times by hand, where a
-# bump would eventually be applied to two targets and not the third.
+# This is the ONLY file all four targets install. It exists to make the
+# shared base explicit rather than duplicated four times by hand, where a
+# bump would eventually be applied to some targets and not the others.
 #
 # Read requirements/README.md before editing any of these. The split is
-# enforced by test_api.py::test_tier_requirements_cover_imports, which fails if
-# a tier's image would be missing something its own code imports.
+# enforced by test_tiers.py::test_tier_requirements_cover_imports, which fails
+# if a tier's image would be missing something its own code imports.
 
 # Settings loading (os.environ / .env parsing). config.py imports it in all
-# three tiers, so it is genuinely universal.
+# four tiers, so it is genuinely universal.
 python-dotenv==1.2.4
 
-# NASA FIRMS + Open-Meteo HTTP client. Needed transitively by all three tiers:
+# NASA FIRMS + Open-Meteo HTTP client. Needed transitively by all four tiers:
 #   acquisition -> clients/firms.py, clients/weather.py
 #   processing  -> services/processing.py imports services/risk.py, which
 #                  enriches records through clients/weather.py

@@ -19,8 +19,10 @@ cachea por coordenada exacta.
 Límite de tasa (Rate limiting):
 -------------------------------
 La política de uso de la OpenStreetMap Foundation para Nominatim limita este uso a 1 req/s.
-El cliente impone el intervalo internamente y cachea también las respuestas fallidas para
-no repetir intentos continuos ante incidencias del servicio upstream.
+El cliente impone el intervalo internamente. ``get_location`` conserva el
+comportamiento tolerante del procesador (un fallo se degrada a ``None``);
+``get_location_checked`` distingue un fallo de transporte de un punto sin
+topónimo para que el backfill no marque el primero como definitivo.
 """
 
 from __future__ import annotations
@@ -51,6 +53,10 @@ _LOCALITY_KEYS = (
 )
 
 
+class GeocodeError(RuntimeError):
+    """A transport/response failure, distinct from a point with no mapped locality."""
+
+
 class GeoCodeClient:
     """Geocodifica inversamente coordenadas a nombres de lugar mediante Nominatim."""
 
@@ -67,6 +73,10 @@ class GeoCodeClient:
         )
         # Indexado por coordenada exacta, deliberadamente NO por celda redondeada.
         self._cache: Dict[tuple, Optional[Dict[str, str]]] = {}
+        # Los fallos se cachean para ``get_location`` (procesador), pero se
+        # mantienen separados de ``_cache`` para que ``get_location_checked``
+        # no los confunda con un punto sin topónimo.
+        self._failures: set[tuple] = set()
         self._lock = threading.Lock()
         self._last_call = 0.0
         self.hits = 0
@@ -79,41 +89,57 @@ class GeoCodeClient:
 
     def get_location(self, latitude: float, longitude: float) -> Optional[Dict[str, str]]:
         """
-        Geocodifica inversamente una coordenada.
+        Geocodifica inversamente una coordenada, degradando fallos a ``None``.
+
+        ``None`` puede significar dos cosas: un fallo de transporte o un punto
+        sin localidad mapeada. El procesador tolera ambos; el backfill usa
+        :meth:`get_location_checked` cuando necesita distinguirlos.
+        """
+        try:
+            return self.get_location_checked(latitude, longitude)
+        except GeocodeError:
+            return None
+
+    def get_location_checked(
+        self, latitude: float, longitude: float
+    ) -> Optional[Dict[str, str]]:
+        """
+        Geocodifica inversamente una coordenada y distingue un fallo real.
 
         Retorna
         -------
         dict o None
-            {
-                "locality": str,     # municipio / localidad, "" si es desconocido
-                "province": str,     # provincia / departamento / distrito
-                "community": str,    # comunidad autónoma / región
-                "country": str,
-                "country_code": str, # ej. "es", "fr", "pt"
-                "display_name": str,
-            }
+            El diccionario de toponimia, o ``None`` si el punto no tiene
+            localidad mapeada (por ejemplo, mar abierto).
 
-        ``None`` indica que la consulta falló o el punto carece de localidad mapeada (mar abierto).
-        Ambos se cachean para no repetir llamadas innecesarias.
+        Lanza
+        -----
+        GeocodeError
+            Si la consulta HTTP o el parseo de la respuesta fallan. Los fallos
+            se cachean para no martillear Nominatim desde el mismo proceso.
         """
         try:
             key = self._key(latitude, longitude)
         except (TypeError, ValueError) as exc:
-            logger.warning(
-                "Coordenadas inválidas para geocodificación inversa (%r, %r): %s",
-                latitude,
-                longitude,
-                exc,
-            )
-            return None
+            raise GeocodeError(
+                f"invalid coordinates for reverse geocoding: ({latitude!r}, {longitude!r})"
+            ) from exc
 
         with self._lock:
+            if key in self._failures:
+                self.hits += 1
+                raise GeocodeError("previous lookup for this coordinate failed")
             if key in self._cache:
                 self.hits += 1
                 return self._cache[key]
 
         self.misses += 1
-        result = self._fetch(latitude, longitude)
+        try:
+            result = self._fetch(latitude, longitude)
+        except GeocodeError:
+            with self._lock:
+                self._failures.add(key)
+            raise
 
         with self._lock:
             self._cache[key] = result
@@ -150,9 +176,18 @@ class GeoCodeClient:
             logger.warning(
                 "Geocodificación inversa fallida para (%.4f, %.4f): %s", latitude, longitude, exc
             )
-            return None
+            raise GeocodeError(str(exc)) from exc
 
-        return self._parse(data)
+        try:
+            return self._parse(data)
+        except Exception as exc:
+            logger.warning(
+                "Respuesta de Nominatim inválida para (%.4f, %.4f): %s",
+                latitude,
+                longitude,
+                exc,
+            )
+            raise GeocodeError("invalid Nominatim response") from exc
 
     @staticmethod
     def _parse(data: Dict) -> Optional[Dict[str, str]]:

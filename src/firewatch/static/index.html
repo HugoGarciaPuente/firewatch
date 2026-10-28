@@ -13,7 +13,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="/static/style.css?v=13">
+  <link rel="stylesheet" href="/static/style.css?v=17">
 </head>
 <body>
   <div class="app-container">
@@ -22,7 +22,7 @@
       <div class="brand">
         <span class="brand-icon">🔥</span>
         <div>
-          <h1 class="brand-title">FireWatch <span class="badge badge-phase"></span></h1>
+          <h1 class="brand-title">FireWatch </h1>
           <p class="brand-subtitle">Detección Satelital FIRMS &amp; Modelado de Riesgo en Tiempo Real</p>
         </div>
       </div>
@@ -35,14 +35,17 @@
         <a href="/stats" class="btn btn-secondary" title="Ver estadísticas por provincia y municipio">
           <span class="icon">📊</span> Estadísticas
         </a>
+        <a href="/forecast" class="btn btn-secondary" title="Mapa de probabilidad provincial a 24 h">
+          <span class="icon">📈</span> Pronóstico
+        </a>
+        <a href="/sources" class="btn btn-secondary" title="APIs, datos y método">
+          <span class="icon">📚</span> Fuentes
+        </a>
         <button id="btn-refresh" class="btn btn-secondary" title="Actualizar datos">
           <span class="icon">🔄</span> Actualizar
         </button>
         <button id="btn-logout" class="btn btn-secondary" title="Cerrar sesión">
           <span class="icon">⎋</span> Salir
-        </button>
-        <button id="btn-open-ingest" class="btn btn-primary" title="Lanzar ingesta">
-          <span class="icon"></span> Nueva Ingesta
         </button>
       </div>
     </header>
@@ -179,33 +182,6 @@
     </main>
   </div>
 
-  <!-- Ventana modal de ingesta -->
-  <div id="ingest-modal" class="modal-backdrop" style="display: none;">
-    <div class="modal-card">
-      <div class="modal-header">
-        <h3 class="modal-title">🛰️ Disparar Ingesta NASA FIRMS</h3>
-        <button id="btn-close-modal" class="btn-close">&times;</button>
-      </div>
-      <form id="ingest-form">
-        <div class="form-group">
-          <label for="ingest-bbox">Bounding Box (sur, oeste, norte, este)</label>
-          <input type="text" id="ingest-bbox" class="form-input" value="35.9,-9.6,43.9,3.6" required>
-          <small class="form-hint">Regiones: Península 35.9,-9.6,43.9,3.6 · Baleares 38.5,0.4,40.7,4.7 · Canarias 27.4,-18.7,29.6,-13.1</small>
-        </div>
-        <div class="form-group">
-          <label for="ingest-date">Fecha (YYYY-MM-DD, opcional)</label>
-          <input type="date" id="ingest-date" class="form-input">
-          <small class="form-hint">Dejar vacío para el día actual</small>
-        </div>
-        <div class="modal-actions">
-          <button type="button" id="btn-cancel-modal" class="btn btn-secondary">Cancelar</button>
-          <button type="submit" id="btn-submit-ingest" class="btn btn-primary">Ejecutar Ingesta</button>
-        </div>
-      </form>
-      <div id="ingest-feedback" class="feedback-box" style="display: none;"></div>
-    </div>
-  </div>
-
   <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
   <!-- Leaflet.heat (capa de mapa de calor) -->
@@ -215,6 +191,6 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
   <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
   <!-- Código de la aplicación -->
-  <script src="/static/app.js?v=11"></script>
+  <script src="/static/app.js?v=14"></script>
 </body>
 </html>

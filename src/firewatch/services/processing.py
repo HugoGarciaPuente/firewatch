@@ -12,14 +12,22 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import time
 from typing import Dict, Optional
 
 from kafka import KafkaConsumer
+from kafka.structs import OffsetAndMetadata, TopicPartition
 
 from firewatch.config import country_in_scope, settings, tracked_country_codes
 from firewatch.services.risk import score_event
 
 logger = logging.getLogger(__name__)
+
+DB_RECONNECT_DELAYS = (1.0, 2.0, 5.0)
+
+
+class DatabaseUnavailable(RuntimeError):
+    """The processor could not recover a PostgreSQL connection."""
 
 
 def create_consumer(
@@ -32,7 +40,10 @@ def create_consumer(
         topic or settings.KAFKA_INGEST_TOPIC,
         bootstrap_servers=bootstrap_servers or settings.KAFKA_BOOTSTRAP_SERVERS,
         group_id=group_id,
-        enable_auto_commit=True,
+        # El offset solo se confirma después de que la fila esté en Postgres.
+        # Con auto-commit, Kafka avanza la posición al hacer poll y un crash
+        # puede perder mensajes que nunca llegaron a la base de datos.
+        enable_auto_commit=False,
         auto_offset_reset="earliest",
         value_deserializer=lambda v: json.loads(v.decode("utf-8")),
         session_timeout_ms=30000,        # 30s (por defecto 10s)
@@ -95,6 +106,91 @@ def _ensure_table(conn) -> None:
             """
         )
     conn.commit()
+
+
+def _connect_db():
+    """Open a PostgreSQL connection without importing psycopg2 at module level."""
+    import psycopg2
+
+    return psycopg2.connect(settings.POSTGRES_DSN)
+
+
+def _is_connection_error(exc: BaseException) -> bool:
+    """True for failures that a fresh PostgreSQL connection can recover from."""
+    try:
+        import psycopg2
+    except ImportError:
+        return False
+    return isinstance(exc, (psycopg2.OperationalError, psycopg2.InterfaceError))
+
+
+def _reconnect_database(conn):
+    """Close a broken connection and retry with bounded exponential backoff."""
+    with contextlib.suppress(Exception):
+        conn.close()
+
+    last_error = None
+    for delay in DB_RECONNECT_DELAYS:
+        time.sleep(delay)
+        try:
+            new_conn = _connect_db()
+            _ensure_table(new_conn)
+            logger.warning("Reconnected to PostgreSQL; resuming processing")
+            return new_conn
+        except Exception as exc:
+            last_error = exc
+            logger.error("PostgreSQL reconnect failed: %s", exc)
+
+    raise DatabaseUnavailable("could not reconnect to PostgreSQL") from last_error
+
+
+def _upsert_with_reconnect(conn, record: Dict, weather, location, can_reconnect: bool):
+    """Persist one record, reconnecting and retrying the same message on connection loss.
+
+    The Kafka offset is not committed until this function returns, so a reconnect
+    either persists the current message or stops the consumer; it never skips it.
+    """
+    attempt = 0
+    while True:
+        try:
+            return conn, upsert_record(conn, record, weather=weather, location=location)
+        except Exception as exc:
+            if not can_reconnect or not _is_connection_error(exc):
+                raise
+            if attempt >= len(DB_RECONNECT_DELAYS):
+                raise DatabaseUnavailable("could not persist record after reconnect") from exc
+
+            logger.error("PostgreSQL connection lost while persisting record: %s", exc)
+            with contextlib.suppress(Exception):
+                conn.rollback()
+            conn = _reconnect_database(conn)
+            attempt += 1
+
+
+def _commit_message(consumer, message) -> None:
+    """Commit exactly the offset of ``message`` once it has been handled.
+
+    Committing after each message (instead of ``consumer.commit()``) avoids
+    marking later messages from the same poll as consumed before they are
+    processed. Stub consumers used by tests may not expose ``commit``.
+    """
+    commit = getattr(consumer, "commit", None)
+    if commit is None:
+        return
+
+    topic = getattr(message, "topic", None)
+    partition = getattr(message, "partition", None)
+    offset = getattr(message, "offset", None)
+    if topic is None or partition is None or offset is None:
+        # Compatibility with simple test doubles that only model ``value``.
+        commit()
+        return
+
+    commit(
+        {
+            TopicPartition(topic, partition): OffsetAndMetadata(offset + 1, ""),
+        }
+    )
 
 
 class InvalidRecord(ValueError):
@@ -281,15 +377,17 @@ def consume_and_process(
     Se ejecuta hasta procesar ``batch_limit`` mensajes (o indefinidamente si es None).
     Si ``max_empty_polls`` está definido, se detiene tras ese número de encuestas vacías consecutivas.
 
-    Los registros malformados se registran y omiten para no bloquear la partición en caso de error.
+    Los registros inválidos o fuera de ámbito se registran, se confirman y se
+    omiten para no bloquear la partición. Un fallo de persistencia no clasificado
+    o una base de datos que no se puede recuperar detiene el consumidor para que
+    Kafka reentregue el mensaje en lugar de perderlo en silencio.
 
-    Devuelve el número de mensajes procesados correctamente.
+    El offset de Kafka se confirma después del commit en PostgreSQL, mensaje a
+    mensaje. Devuelve el número de mensajes persistidos correctamente.
     """
     close_conn = conn is None
     if conn is None:
-        import psycopg2
-
-        conn = psycopg2.connect(settings.POSTGRES_DSN)
+        conn = _connect_db()
     _ensure_table(conn)
 
     if consumer is None:
@@ -329,6 +427,7 @@ def consume_and_process(
                     err_func = getattr(message, "error", None)
                     if callable(err_func) and err_func():
                         logger.error("Kafka consumer error: %s", err_func())
+                        _commit_message(consumer, message)
                         continue
                     val = getattr(message, "value", message)
                     record = val() if callable(val) else val
@@ -353,26 +452,43 @@ def consume_and_process(
                     except Exception as exc:
                         logger.debug("Enrichment lookup failed: %s", exc)
 
-                    # Un registro malformado no debe detener el consumidor
+                    # Un registro malformado no debe detener el consumidor. Un
+                    # fallo de conexión sí: se reintenta con una conexión nueva
+                    # antes de confirmar el offset de este mensaje.
                     try:
-                        upsert_record(conn, record, weather=weather, location=location)
+                        conn, _ = _upsert_with_reconnect(
+                            conn,
+                            record,
+                            weather=weather,
+                            location=location,
+                            can_reconnect=close_conn,
+                        )
                     except OutOfScope as exc:
                         out_of_scope += 1
                         logger.info("Discarding out-of-scope FIRMS record: %s", exc)
+                        _commit_message(consumer, message)
                         continue
                     except InvalidRecord as exc:
                         skipped += 1
                         logger.error("Discarding invalid FIRMS record: %s", exc)
+                        _commit_message(consumer, message)
                         continue
+                    except DatabaseUnavailable:
+                        # No se confirma el offset: el mensaje se reintentará
+                        # cuando el contenedor arranque de nuevo.
+                        raise
                     except Exception as exc:
-                        skipped += 1
                         logger.exception(
                             "Failed to persist record (%s): %s", record.get("acq_date"), exc
                         )
                         with contextlib.suppress(Exception):
                             conn.rollback()
-                        continue
+                        # Un error no clasificado no debe convertirse en una
+                        # pérdida silenciosa: se detiene el consumidor y Kafka
+                        # reentrega el mensaje.
+                        raise
 
+                    _commit_message(consumer, message)
                     processed += 1
 
                     if batch_limit is not None and processed >= batch_limit:

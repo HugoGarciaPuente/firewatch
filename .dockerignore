@@ -16,6 +16,9 @@ logs
 !README.md
 # requirements/README.md explains the tier split and is not needed to build.
 requirements/README.md
+# Offline datasets, trained artifacts and generated reports stay on the host.
+data/
+reports/
 
 # --- Python artefacts ---
 **/__pycache__

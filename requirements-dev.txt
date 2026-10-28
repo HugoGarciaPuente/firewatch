@@ -5,3 +5,8 @@
 ruff==0.16.10
 
 pytest==9.1.1
+
+# Host ML training and local inference. The forecast image installs its own
+# copy from requirements/forecast.txt; API/processor/acquisition do not.
+pandas==3.1.0
+scikit-learn==1.9.1

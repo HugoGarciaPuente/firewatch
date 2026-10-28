@@ -57,6 +57,8 @@ app = FastAPI(
     - Pipeline NASA FIRMS -> Kafka -> PostgreSQL/PostGIS -> FastAPI
     - Fase 2: Modelado de riesgo físico y enriquecimiento meteorológico
     - Dashboard Web GIS interactivo en /dashboard
+    - Mapa provincial de pronóstico a 24 h en /forecast
+    - Fuentes y metodología en /sources
     """,
 )
 
@@ -96,6 +98,9 @@ def root():
         "version": settings.APP_VERSION,
         "status": "running",
         "dashboard": "/dashboard",
+        "forecast": "/forecast",
+        "stats": "/stats",
+        "sources": "/sources",
     }
 
 
@@ -113,6 +118,22 @@ def stats_page(_: str = Depends(require_session)):
     if STATIC_DIR.exists() and (STATIC_DIR / "stats.html").exists():
         return FileResponse(STATIC_DIR / "stats.html")
     raise HTTPException(status_code=404, detail="Statistics static files not found")
+
+
+@app.get("/forecast", include_in_schema=False)
+def forecast_page(_: str = Depends(require_session)):
+    """Mapa provincial de probabilidad de incendio a 24 h. Requiere sesión."""
+    if STATIC_DIR.exists() and (STATIC_DIR / "forecast.html").exists():
+        return FileResponse(STATIC_DIR / "forecast.html")
+    raise HTTPException(status_code=404, detail="Forecast static files not found")
+
+
+@app.get("/sources", include_in_schema=False)
+def sources_page(_: str = Depends(require_session)):
+    """Fuentes, APIs y metodología del sistema. Requiere sesión."""
+    if STATIC_DIR.exists() and (STATIC_DIR / "sources.html").exists():
+        return FileResponse(STATIC_DIR / "sources.html")
+    raise HTTPException(status_code=404, detail="Sources static files not found")
 
 
 @app.get("/health", include_in_schema=False)

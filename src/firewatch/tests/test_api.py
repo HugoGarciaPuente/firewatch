@@ -69,6 +69,12 @@ def test_openapi_document_generated():
     assert {"date", "start_date", "end_date", "province", "limit"} <= set(locality_params)
     # The province selector needs the full list, not only the top N ranking
     assert "/api/v1/fire/provinces" in paths
+    # The ML forecast is read from fire_predictions, with an optional date/model
+    assert "/api/v1/fire/forecast" in paths
+    forecast_params = [
+        p["name"] for p in paths["/api/v1/fire/forecast"]["get"]["parameters"]
+    ]
+    assert {"date", "model"} <= set(forecast_params)
 
 
 def test_dashboard_endpoint_requires_session(authed):
@@ -87,6 +93,27 @@ def test_stats_page_requires_session(authed):
     response = authed.get("/stats")
     assert response.status_code == 200
     assert "Estadísticas" in response.text
+
+
+def test_forecast_page_requires_session(authed):
+    """The forecast map is a separate dashboard shell and must stay protected."""
+    assert client.get("/forecast").status_code == 401
+
+    response = authed.get("/forecast")
+    assert response.status_code == 200
+    assert "Pronóstico 24 h" in response.text
+    assert 'id="forecast-map"' in response.text
+
+
+def test_sources_page_requires_session(authed):
+    """The sources page is part of the protected shell, not a public readme."""
+    assert client.get("/sources").status_code == 401
+
+    response = authed.get("/sources")
+    assert response.status_code == 200
+    assert "Fuentes y método" in response.text
+    for source in ("NASA FIRMS", "EFFIS", "Open-Meteo", "Nominatim"):
+        assert source in response.text
 
 
 def test_login_page_is_public():
@@ -273,6 +300,183 @@ def test_list_provinces_returns_selector_options(authed, monkeypatch):
     ]
 
 
+def test_forecast_defaults_to_latest_date_and_model(authed, monkeypatch):
+    """The dashboard must open on the latest forecast, not on an empty today."""
+    from datetime import date, datetime, timezone
+
+    from firewatch.api import endpoints as ep
+
+    class FakeCursor:
+        def __init__(self):
+            self.calls = []
+            self._one = None
+            self._rows = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params=None):
+            self.calls.append((sql, params))
+            if "MAX(target_date)" in sql:
+                self._one = (date(2026, 10, 29),)
+            elif "SELECT model_name" in sql:
+                self._one = ("hgb",)
+            elif "FROM fire_predictions" in sql:
+                self._rows = [
+                    (
+                        "28",
+                        "Madrid",
+                        0.1007123,
+                        0.1658653,
+                        "590c93d9b521",
+                        "open-meteo-archive+forecast",
+                        datetime(2026, 10, 28, 8, 43, 45, tzinfo=timezone.utc),
+                    ),
+                    (
+                        "33",
+                        "Asturias",
+                        0.0715243,
+                        0.0838815,
+                        "590c93d9b521",
+                        "open-meteo-archive+forecast",
+                        datetime(2026, 10, 28, 8, 43, 45, tzinfo=timezone.utc),
+                    ),
+                ]
+
+        def fetchone(self):
+            return self._one
+
+        def fetchall(self):
+            return self._rows
+
+    class FakeConn:
+        def __init__(self):
+            self.cursor_instance = None
+
+        def cursor(self):
+            self.cursor_instance = FakeCursor()
+            return self.cursor_instance
+
+        def close(self):
+            pass
+
+    conn = FakeConn()
+    monkeypatch.setattr(ep.psycopg2, "connect", lambda *args, **kwargs: conn)
+
+    response = authed.get("/api/v1/fire/forecast")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["target_date"] == "2026-10-29"
+    assert data["model_name"] == "hgb"
+    assert data["model_version"] == "590c93d9b521"
+    assert data["weather_source"] == "open-meteo-archive+forecast"
+    assert data["generated_at"] == "2026-10-28T08:43:45+00:00"
+    assert data["count"] == 2
+    assert data["provinces"] == [
+        {
+            "province_code": "28",
+            "province_name": "Madrid",
+            "probability": 0.1007,
+            "probability_calibrated": 0.1659,
+            "latitude": 40.4168,
+            "longitude": -3.7038,
+        },
+        {
+            "province_code": "33",
+            "province_name": "Asturias",
+            "probability": 0.0715,
+            "probability_calibrated": 0.0839,
+            "latitude": 43.3619,
+            "longitude": -5.8494,
+        },
+    ]
+
+    calls = conn.cursor_instance.calls
+    assert any("MAX(target_date)" in sql for sql, _ in calls)
+    assert [params for sql, params in calls if "ORDER BY probability DESC" in sql] == [
+        ("2026-10-29", "hgb")
+    ]
+
+
+def test_forecast_returns_404_for_an_absent_date(authed, monkeypatch):
+    from firewatch.api import endpoints as ep
+
+    class FakeCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params=None):
+            pass
+
+        def fetchone(self):
+            return None
+
+        def fetchall(self):
+            return []
+
+    class FakeConn:
+        def cursor(self):
+            return FakeCursor()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(ep.psycopg2, "connect", lambda *args, **kwargs: FakeConn())
+
+    response = authed.get("/api/v1/fire/forecast?date=2026-10-30")
+
+    assert response.status_code == 404
+    assert "2026-10-30" in response.json()["detail"]
+
+
+def test_forecast_returns_404_when_the_table_is_empty(authed, monkeypatch):
+    from firewatch.api import endpoints as ep
+
+    class FakeCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def execute(self, sql, params=None):
+            pass
+
+        def fetchone(self):
+            return (None,)
+
+        def fetchall(self):
+            return []
+
+    class FakeConn:
+        def cursor(self):
+            return FakeCursor()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(ep.psycopg2, "connect", lambda *args, **kwargs: FakeConn())
+
+    response = authed.get("/api/v1/fire/forecast")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "No forecast available"
+
+
+def test_forecast_rejects_an_invalid_date(authed):
+    response = authed.get("/api/v1/fire/forecast?date=2026-13-01")
+
+    assert response.status_code == 422
+    assert "YYYY-MM-DD" in response.json()["detail"]
+
+
 @pytest.mark.parametrize(
     "query",
     [
@@ -294,6 +498,7 @@ def test_fire_endpoints_require_a_session():
         "/api/v1/fire/stats",
         "/api/v1/fire/dates",
         "/api/v1/fire/events",
+        "/api/v1/fire/forecast",
         "/api/v1/fire/locality-stats",
         "/api/v1/fire/provinces",
     ):
@@ -401,9 +606,13 @@ def test_static_dashboard_shell_requires_session():
     for path in (
         "/static/index.html",
         "/static/stats.html",
+        "/static/forecast.html",
+        "/static/sources.html",
         "/static/app.js",
         "/static/stats.js",
+        "/static/forecast.js",
         "/static/style.css",
+        "/static/data/spain-provinces.geojson",
     ):
         assert client.get(path).status_code == 401, path
 
@@ -412,9 +621,13 @@ def test_static_assets_served_with_session(authed):
     for path in (
         "/static/index.html",
         "/static/stats.html",
+        "/static/forecast.html",
+        "/static/sources.html",
         "/static/app.js",
         "/static/stats.js",
+        "/static/forecast.js",
         "/static/style.css",
+        "/static/data/spain-provinces.geojson",
     ):
         assert authed.get(path).status_code == 200, path
 
@@ -424,6 +637,30 @@ def test_login_page_does_not_depend_on_protected_static():
     body = client.get("/login").text
     assert "/static/style.css" not in body, "login page would render unstyled"
     assert "--bg-main" in body, "login page should carry its own variables"
+
+
+def test_forecast_is_a_separate_page_with_a_province_map():
+    """Forecasts live on /forecast, not inside the FIRMS dashboard."""
+    static_dir = Path(__file__).resolve().parents[1] / "static"
+    dashboard_html = (static_dir / "index.html").read_text(encoding="utf-8")
+    forecast_html = (static_dir / "forecast.html").read_text(encoding="utf-8")
+    forecast_js = (static_dir / "forecast.js").read_text(encoding="utf-8")
+
+    assert 'href="/forecast"' in dashboard_html
+    assert "forecast-list" not in dashboard_html
+    assert 'id="forecast-map"' in forecast_html
+    assert "/api/v1/fire/forecast" in forecast_js
+    assert "/static/data/spain-provinces.geojson" in forecast_js
+    assert "colorForProbability" in forecast_js
+
+
+def test_sources_page_is_linked_from_every_section():
+    """The last section must be reachable from every protected page."""
+    static_dir = Path(__file__).resolve().parents[1] / "static"
+
+    for name in ("index.html", "stats.html", "forecast.html"):
+        body = (static_dir / name).read_text(encoding="utf-8")
+        assert 'href="/sources"' in body, name
 
 
 def test_stats_js_ignores_stale_filter_responses():

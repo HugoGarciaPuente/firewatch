@@ -117,6 +117,33 @@ services:
     networks: [firewatch]
 
   # ---------------------------------------------------------------------
+  # Tier 4 - forecast: Open-Meteo -> modelo ML -> fire_predictions.
+  # Worker periódico, no servidor. El artefacto joblib se monta en solo lectura.
+  # ---------------------------------------------------------------------
+  forecast:
+    build:
+      context: .
+      target: forecast
+    image: firewatch:forecast
+    container_name: firewatch-forecast
+    <<: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - python
+      - -m
+      - firewatch.runner
+      - forecast
+      - --loop
+      - --interval-minutes
+      - ${FORECAST_INTERVAL_MINUTES:-180}
+    volumes:
+      - app_logs:/app/logs
+      - ./data/models:/app/data/models:ro
+    networks: [firewatch]
+
+  # ---------------------------------------------------------------------
   # Tier 1 - acquisition: FIRMS + Open-Meteo -> Kafka. Sin driver de base de datos.
   # ---------------------------------------------------------------------
   refresh:
@@ -129,6 +156,15 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+    command:
+      - python
+      - -m
+      - firewatch.runner
+      - daily
+      - --days
+      - "3"
+      - --interval-minutes
+      - ${REFRESH_INTERVAL_MINUTES:-30}
     volumes:
       - app_logs:/app/logs
     networks: [firewatch]

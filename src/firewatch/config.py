@@ -27,6 +27,21 @@ class Settings:
     # junio hace falta VIIRS_SNPP_SP; desde julio, VIIRS_SNPP_NRT.
     NASA_FIRMS_SOURCE: str = os.getenv("NASA_FIRMS_SOURCE", "VIIRS_SNPP_NRT")
 
+    # EFFIS / etiquetas de incendios confirmados.
+    # FIRMS detecta anomalías térmicas, no incendios confirmados. EFFIS publica
+    # las áreas quemadas perimetradas y es la fuente de las etiquetas del modelo
+    # de predicción a 24 h. La API no filtra por fecha: se pagina y se filtra
+    # localmente. El catálogo español ronda los 12.700 registros.
+    EFFIS_BASE_URL: str = os.getenv(
+        "EFFIS_BASE_URL",
+        "https://api.effis.emergency.copernicus.eu/rest/2/burntareas/current",
+    )
+    EFFIS_COUNTRY: str = os.getenv("EFFIS_COUNTRY", "ES")
+    # 250 tarda ~15 s por página y es estable; una página de 500 no llegó a
+    # responder dentro del tiempo de espera usado al probar la API.
+    EFFIS_PAGE_SIZE: int = int(os.getenv("EFFIS_PAGE_SIZE", "250"))
+    EFFIS_MIN_AREA_HA: float = float(os.getenv("EFFIS_MIN_AREA_HA", "1.0"))
+
     # Regiones de seguimiento. El área continental europea genera decenas de
     # miles de focos diarios que no aportan a un aviso de riesgo sobre estos
     # territorios, así que el scope se limita a España (península e islas).

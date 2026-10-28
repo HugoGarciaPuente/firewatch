@@ -31,6 +31,12 @@ logs/
 *.log
 *.out
 
+# Offline datasets and trained artifacts. Rebuild with `runner panel`,
+# `runner province-weather` and `python -m firewatch.ml.train`.
+# Anchored to the repository root: static/data/ contains a committed asset.
+/data/
+*.joblib
+
 # Editors / OS
 .vscode/
 .idea/

@@ -14,6 +14,12 @@ def firms_sample() -> list[dict]:
     return json.loads((FIXTURES_DIR / "firms_sample.json").read_text(encoding="utf-8"))
 
 
+@pytest.fixture
+def effis_sample() -> list[dict]:
+    """Sample EFFIS burnt-area records (raw API shape) from fixtures."""
+    return json.loads((FIXTURES_DIR / "effis_sample.json").read_text(encoding="utf-8"))
+
+
 @pytest.fixture(autouse=True)
 def _block_outbound_network(monkeypatch, request):
     """Fail loudly if a test opens a real socket.

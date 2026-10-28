@@ -1,0 +1,9 @@
+# Tier 4 - forecast (`forecast`).
+#
+# Runs `runner forecast --loop` to regenerate fire_predictions. It writes the
+# derived table, so it needs psycopg2, and it loads the trained joblib artifact,
+# so it needs the ML stack. It serves no HTTP: fastapi/uvicorn stay out.
+
+-r processing.txt
+pandas==3.1.0
+scikit-learn==1.9.1

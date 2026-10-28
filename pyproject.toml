@@ -8,10 +8,11 @@ version = "0.2.0"
 description = "Wildfire early warning system: NASA FIRMS -> Kafka -> PostgreSQL/PostGIS -> FastAPI"
 requires-python = ">=3.11"
 # Pinned exactly: a container built from this must not drift between builds.
-# This is the UNION of all three tiers, kept here so `pip install -e .` works on
-# the host. The container build does not read it: the Dockerfile installs one of
-# requirements/{acquisition,processing,api}.txt so each image carries only what
-# its own code imports. Keep both in sync --
+# This is the union of the runtime web/ingestion/processing tiers, kept here so
+# `pip install -e .` works on the host. The container build does not read it:
+# the Dockerfile installs one of requirements/{acquisition,processing,forecast,api}.txt
+# so each image carries only what its own code imports. ML inference deps live
+# in requirements/forecast.txt and in the `dev` extra below. Keep both in sync:
 # src/firewatch/tests/test_tiers.py fails if they disagree.
 dependencies = [
     "fastapi==0.142.2",
@@ -27,6 +28,9 @@ dependencies = [
 dev = [
     "pytest==9.1.1",
     "ruff==0.16.10",
+    # Host training/inference; the forecast image installs requirements/forecast.txt.
+    "pandas==3.1.0",
+    "scikit-learn==1.9.1",
 ]
 
 [project.scripts]

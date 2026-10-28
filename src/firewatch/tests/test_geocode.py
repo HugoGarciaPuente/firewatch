@@ -19,7 +19,7 @@ already had.
 import httpx
 import pytest
 
-from firewatch.clients.geocode import GeoCodeClient
+from firewatch.clients.geocode import GeoCodeClient, GeocodeError
 
 SPANISH_PAYLOAD = {
     "display_name": "Alarcón, Cuenca, Castilla-La Mancha, España",
@@ -197,6 +197,23 @@ def test_failures_are_cached_too():
 def test_http_error_is_not_fatal():
     client = _client(lambda request: httpx.Response(503, text="unavailable"))
     assert client.get_location(40.0, -3.0) is None
+
+
+def test_checked_lookup_distinguishes_transport_failure_from_no_locality():
+    """The backfill must not record a Nominatim outage as "no mapped locality"."""
+    client = _client(lambda request: httpx.Response(503, text="unavailable"))
+
+    with pytest.raises(GeocodeError):
+        client.get_location_checked(40.0, -3.0)
+
+    # The tolerant processor API still degrades the same failure to None and
+    # uses the cached failure on the next record.
+    assert client.get_location(40.0, -3.0) is None
+
+
+def test_checked_lookup_returns_none_for_a_point_without_locality():
+    client = _client(lambda request: httpx.Response(200, json=NO_RESULT_PAYLOAD))
+    assert client.get_location_checked(35.978, -9.165) is None
 
 
 def test_sends_an_identifying_user_agent():

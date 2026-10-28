@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🔥 FireWatch — Pronóstico 24 h</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+
+  <!-- Google Fonts: Inter + JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="/static/style.css?v=17">
+</head>
+<body>
+  <div class="app-container">
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-icon">🔥</span>
+        <div>
+          <h1 class="brand-title">FireWatch <span class="badge badge-phase">Pronóstico 24 h</span></h1>
+          <p class="brand-subtitle">Probabilidad provincial de incendio confirmado ≥10 ha</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <a href="/dashboard" class="btn btn-secondary" title="Volver al mapa de focos">
+          <span class="icon">🗺️</span> Mapa
+        </a>
+        <a href="/stats" class="btn btn-secondary" title="Ver estadísticas por provincia y municipio">
+          <span class="icon">📊</span> Estadísticas
+        </a>
+        <a href="/sources" class="btn btn-secondary" title="APIs, datos y método">
+          <span class="icon">📚</span> Fuentes
+        </a>
+        <button id="btn-refresh-forecast" class="btn btn-secondary" title="Actualizar pronóstico">
+          <span class="icon">🔄</span> Actualizar
+        </button>
+        <button id="btn-logout" class="btn btn-secondary" title="Cerrar sesión">
+          <span class="icon">⎋</span> Salir
+        </button>
+      </div>
+    </header>
+
+    <main class="workspace forecast-workspace">
+      <div class="map-wrapper">
+        <div id="forecast-map"></div>
+
+        <div class="map-overlay-controls">
+          <div class="preset-regions">
+            <span class="preset-label">Vistas:</span>
+            <button class="btn-chip active" data-bbox="35.9,-9.6,43.9,3.6">Península</button>
+            <button class="btn-chip" data-bbox="38.5,0.4,40.7,4.7">Baleares</button>
+            <button class="btn-chip" data-bbox="27.4,-18.7,29.6,-13.1">Canarias</button>
+            <button class="btn-chip" data-bbox="27.4,-18.7,43.9,4.7">España</button>
+          </div>
+
+          <div class="map-legend forecast-legend">
+            <div class="legend-title">Probabilidad calibrada</div>
+            <div class="forecast-scale" aria-hidden="true"></div>
+            <div class="forecast-scale-labels" aria-hidden="true">
+              <span style="left:0%">0%</span>
+              <span style="left:10%">2%</span>
+              <span style="left:25%">5%</span>
+              <span style="left:50%">10%</span>
+              <span style="left:75%">15%</span>
+              <span style="left:100%">20%+</span>
+            </div>
+            <div class="forecast-legend-note">Provincia coloreada según el riesgo del día objetivo</div>
+          </div>
+        </div>
+
+        <div class="forecast-map-status" id="forecast-map-status">Cargando límites provinciales...</div>
+      </div>
+
+      <aside class="sidebar">
+        <div class="panel-section forecast-panel">
+          <h2 class="panel-title">Pronóstico 24 h</h2>
+          <div class="forecast-meta" id="forecast-meta">Cargando pronóstico...</div>
+          <div class="forecast-summary" id="forecast-summary"></div>
+
+          <div class="forecast-head" aria-hidden="true">
+            <span>#</span>
+            <span>Provincia / score crudo</span>
+            <span>Calibrada</span>
+          </div>
+
+          <div id="forecast-list" class="forecast-list forecast-list-page">
+            <div class="loading-placeholder">Consultando modelo...</div>
+          </div>
+
+          <small class="form-hint">
+            El mapa colorea la probabilidad calibrada. El ranking de la lista usa el
+            score crudo, que ordena mejor. Los polígonos son límites administrativos
+            provinciales, no perímetros de incendio.
+          </small>
+          <small class="form-hint forecast-attribution">
+            Límites: <a href="https://github.com/codeforgermany/click_that_hood" target="_blank" rel="noopener">click_that_hood</a> (MIT).
+          </small>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="/static/forecast.js?v=1"></script>
+</body>
+</html>

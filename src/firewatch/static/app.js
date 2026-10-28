@@ -115,22 +115,6 @@ class FireWatchApp {
       this.highlightSelectedInList();
     });
 
-    // Modal de ingesta
-    const modal = document.getElementById('ingest-modal');
-    document.getElementById('btn-open-ingest').addEventListener('click', () => {
-      modal.style.display = 'flex';
-    });
-    document.getElementById('btn-close-modal').addEventListener('click', () => {
-      modal.style.display = 'none';
-    });
-    document.getElementById('btn-cancel-modal').addEventListener('click', () => {
-      modal.style.display = 'none';
-    });
-
-    document.getElementById('ingest-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      await this.handleIngestSubmit();
-    });
   }
 
   async loadData() {
@@ -151,7 +135,7 @@ class FireWatchApp {
       const res = await fetch('/health/db');
       if (res.ok) {
         dot.className = 'status-dot online';
-        text.textContent = 'PostGIS / Kafka Activo';
+        text.textContent = 'Servidor conectado';
       } else {
         dot.className = 'status-dot offline';
         text.textContent = 'BD No Conectada';
@@ -671,45 +655,6 @@ class FireWatchApp {
     panel.style.display = 'block';
   }
 
-  async handleIngestSubmit() {
-    const bbox = document.getElementById('ingest-bbox').value.trim();
-    const date = document.getElementById('ingest-date').value.trim();
-    const feedback = document.getElementById('ingest-feedback');
-    const submitBtn = document.getElementById('btn-submit-ingest');
-
-    submitBtn.disabled = true;
-    submitBtn.textContent = 'Ingestando...';
-    feedback.style.display = 'none';
-
-    try {
-      const params = new URLSearchParams();
-      if (bbox) params.append('bbox', bbox);
-      if (date) params.append('date', date);
-
-      const res = await fetch(`/api/v1/fire/ingest?${params.toString()}`, { method: 'POST' });
-      const data = await res.json();
-
-      if (res.ok) {
-        feedback.className = 'feedback-box feedback-success';
-        feedback.textContent = `✅ Éxito: Obtenidos ${data.fetched} registros y publicados ${data.ingested} en Kafka.`;
-        feedback.style.display = 'block';
-
-        setTimeout(() => {
-          document.getElementById('ingest-modal').style.display = 'none';
-          this.loadData();
-        }, 1800);
-      } else {
-        throw new Error(data.detail || 'Error en ingesta');
-      }
-    } catch (err) {
-      feedback.className = 'feedback-box feedback-error';
-      feedback.textContent = `❌ Fallo en la ingesta: ${err.message}`;
-      feedback.style.display = 'block';
-    } finally {
-      submitBtn.disabled = false;
-      submitBtn.textContent = 'Ejecutar Ingesta';
-    }
-  }
 }
 
 // Cualquier 401 significa que la sesión expiró: redirige al formulario de login

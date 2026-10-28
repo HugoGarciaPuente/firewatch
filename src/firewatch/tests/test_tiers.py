@@ -1,4 +1,4 @@
-"""Guards the dependency split between the three Docker targets.
+"""Guards the dependency split between the four Docker targets.
 
 The Dockerfile installs one file per tier from requirements/. If someone adds an
 import to services/ and forgets to add the package to the right tier file, the
@@ -32,6 +32,10 @@ DIST_TO_IMPORT = {
     "psycopg2-binary": ["psycopg2"],
     "httpx": ["httpx"],
     "python-dotenv": ["dotenv"],
+    # Offline ML only. Listed so a runtime module that imports firewatch.ml
+    # fails this test instead of building an image that dies at startup.
+    "pandas": ["pandas"],
+    "scikit-learn": ["sklearn"],
 }
 
 # Entry points per tier, mirroring the Dockerfile CMDs.
@@ -47,7 +51,9 @@ TIERS = {
     "processing": [
         "firewatch.runner",
         "firewatch.services.processing",
+        "firewatch.services.labels",
         "firewatch.services.risk",
+        "firewatch.clients.effis",
         "firewatch.clients.weather",
         "firewatch.config",
     ],
@@ -56,6 +62,14 @@ TIERS = {
         "firewatch.api.auth",
         "firewatch.api.auth_routes",
         "firewatch.api.endpoints",
+        "firewatch.config",
+    ],
+    "forecast": [
+        "firewatch.runner",
+        "firewatch.clients.daily_weather",
+        "firewatch.ml.forecast",
+        "firewatch.ml.features",
+        "firewatch.services.forecast",
         "firewatch.config",
     ],
 }
@@ -232,6 +246,46 @@ def test_processing_does_not_ship_a_web_framework():
         assert not imports & {"fastapi", "uvicorn", "starlette"}, (
             f"{entry} imports a web framework; processing serves no HTTP"
         )
+
+
+def test_forecast_tier_has_ml_and_database_dependencies():
+    """The worker loads the joblib model and writes fire_predictions."""
+    declared = _tier_requirements("forecast")
+    assert {"pandas", "scikit-learn", "psycopg2-binary"} <= set(declared)
+
+
+def test_forecast_does_not_ship_a_web_framework():
+    """Inference is a worker, not another HTTP surface."""
+    declared = _tier_requirements("forecast")
+    for dist in ("fastapi", "uvicorn"):
+        assert dist not in declared, f"forecast must not depend on {dist}"
+    for entry in TIERS["forecast"]:
+        imports = _imports_of(entry)
+        assert not imports & {"fastapi", "uvicorn", "starlette"}, (
+            f"{entry} imports a web framework; forecast serves no HTTP"
+        )
+
+
+def test_forecast_worker_is_wired_to_run_continuously():
+    """A one-shot command in compose would leave the map stale, not auto-updated."""
+    dockerfile = (PACKAGE_ROOT / "Dockerfile").read_text(encoding="utf-8")
+    compose = (PACKAGE_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert re.search(
+        r'CMD \["python", "-m", "firewatch\.runner", "forecast", "--loop"',
+        dockerfile,
+    )
+    assert re.search(r"^  forecast:\s*$", compose, re.M)
+    assert re.search(r"^\s*- --loop\s*$", compose, re.M)
+    assert "./data/models:/app/data/models:ro" in compose
+
+
+def test_update_intervals_are_configurable():
+    """Both workers must read their cadence from .env, not a hardcoded CMD."""
+    compose = (PACKAGE_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "${REFRESH_INTERVAL_MINUTES:-30}" in compose
+    assert "${FORECAST_INTERVAL_MINUTES:-180}" in compose
 
 
 def test_dockerfile_targets_match_tiers():

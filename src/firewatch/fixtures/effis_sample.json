@@ -1,0 +1,52 @@
+[
+  {
+    "id": 1001,
+    "centroid": {"type": "Point", "coordinates": [-3.7038, 40.4168]},
+    "bbox": [-3.71, 40.41, -3.69, 40.42],
+    "country": "ES",
+    "countryful": "España",
+    "province": "Madrid",
+    "commune": "Madrid",
+    "firedate": "2026-07-15T14:30:00+02:00",
+    "area_ha": 12.5,
+    "lastupdate": "2026-07-16T08:00:00+02:00",
+    "shape": {
+      "type": "MultiPolygon",
+      "coordinates": [
+        [
+          [
+            [-3.71, 40.41],
+            [-3.69, 40.41],
+            [-3.69, 40.42],
+            [-3.71, 40.42],
+            [-3.71, 40.41]
+          ]
+        ]
+      ]
+    }
+  },
+  {
+    "id": 1002,
+    "centroid": {"type": "Point", "coordinates": [2.1734, 41.3851]},
+    "bbox": [2.16, 41.38, 2.18, 41.39],
+    "country": "ES",
+    "countryful": "España",
+    "province": "Barcelona",
+    "commune": "Barcelona",
+    "firedate": "2026-07-16T09:15:00+02:00",
+    "area_ha": 0.8,
+    "lastupdate": "2026-07-17T08:00:00+02:00"
+  },
+  {
+    "id": 1003,
+    "centroid": {"type": "Point", "coordinates": [-16.6, 28.1]},
+    "bbox": [-16.7, 28.0, -16.5, 28.2],
+    "country": "ES",
+    "countryful": "España",
+    "province": "Santa Cruz de Tenerife",
+    "commune": "Arona",
+    "firedate": "2026-06-01T00:00:00+01:00",
+    "area_ha": 2.0,
+    "lastupdate": "2026-06-02T08:00:00+01:00"
+  }
+]
